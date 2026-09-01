@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { fetchCityBattle } from '../../lib/ranking';
 import { Transaction } from '../../lib/database.types';
 import PointsCard from '../../components/PointsCard';
 import TransactionItem from '../../components/TransactionItem';
@@ -18,11 +20,13 @@ import AccountNumberModal from '../../components/AccountNumberModal';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [stats, setStats] = useState({ bottles: 0, cans: 0 });
+  const [cityBattleRank, setCityBattleRank] = useState<number | null>(null);
 
   const fetchTransactions = useCallback(async () => {
     if (!user) return;
@@ -55,23 +59,42 @@ export default function HomeScreen() {
     });
   }, [user]);
 
+  const fetchCityRank = useCallback(async () => {
+    if (!profile?.city_id) {
+      setCityBattleRank(null);
+      return;
+    }
+    try {
+      const battle = await fetchCityBattle();
+      const entry = battle.find((city) => city.city_id === profile.city_id);
+      setCityBattleRank(entry?.rank ?? null);
+    } catch {
+      setCityBattleRank(null);
+    }
+  }, [profile?.city_id]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refreshProfile(), fetchTransactions(), fetchStats()]);
+    await Promise.all([refreshProfile(), fetchTransactions(), fetchStats(), fetchCityRank()]);
     setRefreshing(false);
-  }, [refreshProfile, fetchTransactions, fetchStats]);
+  }, [refreshProfile, fetchTransactions, fetchStats, fetchCityRank]);
 
   useEffect(() => {
     fetchTransactions();
     fetchStats();
-  }, [fetchTransactions, fetchStats]);
+    fetchCityRank();
+  }, [fetchTransactions, fetchStats, fetchCityRank]);
 
   // Realtime subscription for live point updates
   useEffect(() => {
     if (!user) return;
 
+    const channelTopic = `profile-changes-${user.id}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
     const channel = supabase
-      .channel('profile-changes')
+      .channel(channelTopic)
       .on(
         'postgres_changes',
         {
@@ -105,7 +128,7 @@ export default function HomeScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [fetchStats, fetchTransactions, refreshProfile, user]);
 
   const displayName = profile?.alias || profile?.full_name || 'Recycler';
 
@@ -130,7 +153,7 @@ export default function HomeScreen() {
             style={styles.notifButton}
             onPress={() => setShowAccountNumber(true)}
           >
-            <Ionicons name="keypad" size={22} color={Colors.primary} />
+            <Ionicons name="keypad-outline" size={22} color={Colors.primary} />
           </TouchableOpacity>
         </View>
 
@@ -140,15 +163,43 @@ export default function HomeScreen() {
           cansCount={stats.cans}
         />
 
+        {profile?.city_id && cityBattleRank ? (
+          <TouchableOpacity
+            style={styles.rankingTeaser}
+            onPress={() => router.push('/(tabs)/ranking')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.rankingTeaserIcon}>
+              <Ionicons name="trophy" size={18} color={Colors.accent} />
+            </View>
+            <View style={styles.rankingTeaserContent}>
+              <Text style={styles.rankingTeaserTitle}>Monthly City Battle</Text>
+              <Text style={styles.rankingTeaserText}>
+                Your city is #{cityBattleRank} this month · {profile.monthly_eco_points ?? 0} eco-points
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        ) : null}
+
         <TouchableOpacity
           style={styles.recycleButton}
-          onPress={() => setShowAccountNumber(true)}
+          onPress={() => router.push('/scan')}
           activeOpacity={0.8}
         >
           <View style={styles.recycleButtonInner}>
-            <Ionicons name="keypad" size={24} color={Colors.surface} />
-            <Text style={styles.recycleButtonText}>Show Account Number</Text>
+            <Ionicons name="qr-code" size={24} color={Colors.surface} />
+            <Text style={styles.recycleButtonText}>Scan Machine QR</Text>
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.fallbackButton}
+          onPress={() => setShowAccountNumber(true)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="keypad-outline" size={18} color={Colors.primary} />
+          <Text style={styles.fallbackButtonText}>Use account number instead</Text>
         </TouchableOpacity>
 
         <View style={styles.section}>
@@ -215,6 +266,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  rankingTeaser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  rankingTeaserIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.accent + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rankingTeaserContent: {
+    flex: 1,
+    gap: 2,
+  },
+  rankingTeaserTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  rankingTeaserText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+  },
   recycleButton: {
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.lg,
@@ -237,6 +321,22 @@ const styles = StyleSheet.create({
   recycleButtonText: {
     color: Colors.surface,
     fontSize: FontSize.lg,
+    fontWeight: '700',
+  },
+  fallbackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryLight,
+  },
+  fallbackButtonText: {
+    color: Colors.primaryDark,
+    fontSize: FontSize.sm,
     fontWeight: '700',
   },
   section: {

@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../lib/AuthContext';
 import { updateProfile } from '../../lib/auth';
+import CityPicker from '../../components/CityPicker';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function ProfileSetupScreen() {
@@ -23,6 +24,7 @@ export default function ProfileSetupScreen() {
   const [alias, setAlias] = useState('');
   const [fullName, setFullName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
+  const [cityId, setCityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const calculateAge = (dob: string): number | null => {
@@ -42,6 +44,11 @@ export default function ProfileSetupScreen() {
   const handleSave = async () => {
     if (!alias.trim() && !fullName.trim()) {
       Alert.alert('Error', 'Please enter at least a name or alias');
+      return;
+    }
+
+    if (!cityId) {
+      Alert.alert('Error', 'Please select your department');
       return;
     }
 
@@ -66,6 +73,7 @@ export default function ProfileSetupScreen() {
         full_name: fullName.trim() || null,
         age,
         date_of_birth: formattedDob,
+        city_id: cityId,
       });
 
       await refreshProfile();
@@ -156,6 +164,8 @@ export default function ProfileSetupScreen() {
             </View>
           </View>
 
+          <CityPicker value={cityId} onChange={setCityId} />
+
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSave}
@@ -171,7 +181,11 @@ export default function ProfileSetupScreen() {
           <TouchableOpacity
             style={styles.skipButton}
             onPress={() => {
-              updateProfile(user!.id, { alias: 'Recycler' }).then(() => {
+              if (!cityId) {
+                Alert.alert('Error', 'Please select your department');
+                return;
+              }
+              updateProfile(user!.id, { alias: 'Recycler', city_id: cityId }).then(() => {
                 refreshProfile();
                 router.replace('/(tabs)');
               });

@@ -39,9 +39,10 @@ export default function AccountNumberModal({
           </TouchableOpacity>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Your Account Number</Text>
+            <Text style={styles.title}>Keypad Fallback</Text>
             <Text style={styles.subtitle}>
-              Enter this number on the machine keypad before inserting bottles or cans.
+              Scan the machine QR in the app when possible. Use this account number if the
+              machine keypad is needed.
             </Text>
           </View>
 
@@ -63,19 +64,19 @@ export default function AccountNumberModal({
               <View style={styles.stepBadge}>
                 <Text style={styles.stepBadgeText}>1</Text>
               </View>
-              <Text style={styles.stepText}>Type your account number on the machine keypad.</Text>
+              <Text style={styles.stepText}>Try scanning the QR code on the machine first.</Text>
             </View>
             <View style={styles.stepRow}>
               <View style={styles.stepBadge}>
                 <Text style={styles.stepBadgeText}>2</Text>
               </View>
-              <Text style={styles.stepText}>Press # to validate your account.</Text>
+              <Text style={styles.stepText}>If scanning is unavailable, type this number on the keypad and press #.</Text>
             </View>
             <View style={styles.stepRow}>
               <View style={styles.stepBadge}>
                 <Text style={styles.stepBadgeText}>3</Text>
               </View>
-              <Text style={styles.stepText}>Insert a bottle (+15) or can (+10) to receive points.</Text>
+              <Text style={styles.stepText}>Insert a bottle (+15) or can (+10) once the machine is armed.</Text>
             </View>
           </View>
         </View>
