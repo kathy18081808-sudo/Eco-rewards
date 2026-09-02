@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../lib/AuthContext';
-import { updateProfile, signOut } from '../../lib/auth';
+import { updateProfile, signOut, fetchCities } from '../../lib/auth';
+import { fetchUserMedals } from '../../lib/ranking';
+import CityPicker from '../../components/CityPicker';
+import MedalBadge from '../../components/MedalBadge';
+import { formatCompetitionMonth } from '../../constants/medals';
+import { City, MonthlyUserResult } from '../../lib/database.types';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function ProfileScreen() {
@@ -26,6 +31,22 @@ export default function ProfileScreen() {
       ? new Date(profile.date_of_birth).toLocaleDateString('en-US')
       : ''
   );
+  const [cityId, setCityId] = useState<string | null>(profile?.city_id ?? null);
+  const [cities, setCities] = useState<City[]>([]);
+  const [medals, setMedals] = useState<MonthlyUserResult[]>([]);
+
+  useEffect(() => {
+    fetchCities().then(setCities).catch(() => setCities([]));
+  }, []);
+
+  useEffect(() => {
+    setCityId(profile?.city_id ?? null);
+  }, [profile?.city_id]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchUserMedals(user.id).then(setMedals).catch(() => setMedals([]));
+  }, [user, profile?.monthly_eco_points]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -50,6 +71,7 @@ export default function ProfileScreen() {
         full_name: fullName.trim() || null,
         date_of_birth: formattedDob,
         age,
+        city_id: cityId,
       });
       await refreshProfile();
       setEditing(false);
@@ -105,6 +127,7 @@ export default function ProfileScreen() {
                     ? new Date(profile.date_of_birth).toLocaleDateString('en-US')
                     : ''
                 );
+                setCityId(profile?.city_id ?? null);
                 setEditing(true);
               }}
             >
@@ -140,8 +163,8 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{profile?.age ?? '-'}</Text>
-              <Text style={styles.statLabel}>Age</Text>
+              <Text style={styles.statValue}>{profile?.monthly_eco_points ?? 0}</Text>
+              <Text style={styles.statLabel}>Monthly</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
@@ -205,6 +228,8 @@ export default function ProfileScreen() {
               </View>
             </View>
 
+            <CityPicker value={cityId} onChange={setCityId} />
+
             <View style={styles.formButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
@@ -231,6 +256,11 @@ export default function ProfileScreen() {
             <InfoRow icon="at-outline" label="Alias" value={profile?.alias || 'Not set'} />
             <InfoRow icon="person-outline" label="Full Name" value={profile?.full_name || 'Not set'} />
             <InfoRow
+              icon="location-outline"
+              label="Department"
+              value={cities.find((city) => city.id === profile?.city_id)?.name || 'Not set'}
+            />
+            <InfoRow
               icon="calendar-outline"
               label="Date of Birth"
               value={
@@ -246,6 +276,32 @@ export default function ProfileScreen() {
             <InfoRow icon="mail-outline" label="Email" value={profile?.email || user?.email || ''} />
           </View>
         )}
+
+        <View style={styles.medalsSection}>
+          <Text style={styles.medalsTitle}>Monthly Medals</Text>
+          {medals.length === 0 ? (
+            <Text style={styles.medalsEmpty}>Recycle each month to earn Eco Oro, Plata, and Bronce medals.</Text>
+          ) : (
+            <View style={styles.medalsGrid}>
+              {medals.map((medal) => {
+                if (medal.medal_tier === 'none') return null;
+                const competition = medal.monthly_competitions;
+                return (
+                  <MedalBadge
+                    key={medal.id}
+                    tier={medal.medal_tier}
+                    size="sm"
+                    subtitle={
+                      competition
+                        ? formatCompetitionMonth(competition.year, competition.month)
+                        : undefined
+                    }
+                  />
+                );
+              })}
+            </View>
+          )}
+        </View>
 
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
           <Ionicons name="log-out-outline" size={20} color={Colors.error} />
@@ -492,6 +548,27 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.surface,
+  },
+  medalsSection: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  medalsTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  medalsEmpty: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  medalsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
   },
   signOutButton: {
     flexDirection: 'row',

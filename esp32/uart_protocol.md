@@ -40,10 +40,12 @@ Rules:
 
 ### Controller-Side Handling Rules
 
-- Ignore detections when no account number is active.
+- Ignore detections when no QR session or keypad account number is active.
 - Ignore detections while a previous item is still being processed.
+- QR session flow: the controller polls `poll-session` with its flashed `MACHINE_CODE`, stores the returned `session_id` and account number, then includes both `session_id` and `machine_code` when calling Supabase `add-points`.
+- Keypad fallback: the controller validates the typed account number with `validate-account` and calls `add-points` with the account number only.
 - After accepting a detection, run one servo cycle and then call Supabase `add-points`.
-- Clear the active account only after the points request succeeds.
+- Clear the active controller account only after the points request succeeds. QR sessions remain in Supabase until they expire or are reused by the poll loop.
 
 ### Future-Compatible Extension
 

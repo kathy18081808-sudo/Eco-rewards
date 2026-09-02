@@ -1,0 +1,14 @@
+[functions.add-points]
+verify_jwt = false
+
+[functions.validate-account]
+verify_jwt = false
+
+[functions.poll-session]
+verify_jwt = false
+
+[functions.arm-session]
+verify_jwt = true
+
+[functions.monthly-reset]
+verify_jwt = false

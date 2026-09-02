@@ -2,8 +2,13 @@
 // Called by ESP32 to credit recycling points to a user.
 //
 // POST /functions/v1/add-points
-// Headers: Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>
-// Body: { "user_id"?: "<uuid>", "account_number"?: "<digits>", "item_type": "bottle" | "can" }
+// Body: {
+//   "user_id"?: "<uuid>",
+//   "account_number"?: "<digits>",
+//   "session_id"?: "<uuid>",
+//   "machine_code"?: "<code>",
+//   "item_type": "bottle" | "can"
+// }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -17,94 +22,176 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function hasAcceptedApiKey(req: Request) {
+  const configuredKey =
+    Deno.env.get('SUPABASE_ANON_KEY') ||
+    Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ||
+    '';
+  if (!configuredKey) return true;
+
+  const apiKey = req.headers.get('apikey');
+  const bearer = req.headers.get('Authorization')?.replace('Bearer ', '');
+  return apiKey === configuredKey || bearer === configuredKey;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { user_id, account_number, item_type } = await req.json();
+    if (!hasAcceptedApiKey(req)) {
+      return jsonResponse({ error: 'Unauthorized machine request' }, 401);
+    }
 
-    if ((!user_id && !account_number) || !item_type) {
-      return new Response(
-        JSON.stringify({ error: 'Missing account_number or user_id, or item_type' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    const { user_id, account_number, session_id, machine_code, item_type } = await req.json();
+
+    if ((!user_id && !account_number && !session_id) || !item_type) {
+      return jsonResponse(
+        { error: 'Missing account_number, user_id, or session_id, or item_type' },
+        400
       );
     }
 
     const itemConfig = POINTS_MAP[item_type];
     if (!itemConfig) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid item_type. Must be "bottle" or "can"' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ error: 'Invalid item_type. Must be "bottle" or "can"' }, 400);
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    let session: {
+      id: string;
+      machine_id: string;
+      user_id: string;
+      status: string;
+      expires_at: string;
+      items_processed: number;
+      machines?: { machine_code: string } | { machine_code: string }[];
+    } | null = null;
+
+    if (session_id) {
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('recycling_sessions')
+        .select(`
+          id,
+          machine_id,
+          user_id,
+          status,
+          expires_at,
+          items_processed,
+          machines:machine_id (
+            machine_code
+          )
+        `)
+        .eq('id', session_id)
+        .single();
+
+      if (sessionError || !sessionData) {
+        return jsonResponse({ error: 'Session not found' }, 404);
+      }
+
+      session = sessionData;
+      const sessionMachine = Array.isArray(session.machines)
+        ? session.machines[0]
+        : session.machines;
+
+      if (session.status !== 'armed' || new Date(session.expires_at).getTime() <= Date.now()) {
+        if (session.status === 'armed') {
+          await supabase
+            .from('recycling_sessions')
+            .update({ status: 'expired' })
+            .eq('id', session.id);
+        }
+        return jsonResponse({ error: 'Session is not armed' }, 409);
+      }
+
+      if (machine_code && sessionMachine?.machine_code !== String(machine_code).trim().toUpperCase()) {
+        return jsonResponse({ error: 'Session does not belong to this machine' }, 409);
+      }
+    }
+
     let profileQuery = supabase
       .from('profiles')
-      .select('id, points_balance, account_number');
+      .select('id, points_balance, monthly_eco_points, account_number');
 
-    profileQuery = account_number
-      ? profileQuery.eq('account_number', account_number)
-      : profileQuery.eq('id', user_id);
+    if (session) {
+      profileQuery = profileQuery.eq('id', session.user_id);
+    } else {
+      profileQuery = account_number
+        ? profileQuery.eq('account_number', account_number)
+        : profileQuery.eq('id', user_id);
+    }
 
     const { data: profile, error: profileError } = await profileQuery.single();
 
     if (profileError || !profile) {
-      return new Response(
-        JSON.stringify({ error: 'User not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ error: 'User not found' }, 404);
     }
 
-    // Insert transaction
+    if (session && account_number && profile.account_number !== String(account_number)) {
+      return jsonResponse({ error: 'Session account mismatch' }, 409);
+    }
+
     const { error: txError } = await supabase.from('transactions').insert({
       user_id: profile.id,
       type: item_type,
       points: itemConfig.points,
       description: itemConfig.description,
+      machine_id: session?.machine_id ?? null,
+      session_id: session?.id ?? null,
     });
 
     if (txError) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to create transaction' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ error: 'Failed to create transaction' }, 500);
     }
 
-    // Update points balance
     const newBalance = profile.points_balance + itemConfig.points;
+    const newMonthlyEcoPoints = (profile.monthly_eco_points ?? 0) + itemConfig.points;
     const { error: updateError } = await supabase
       .from('profiles')
-      .update({ points_balance: newBalance })
+      .update({
+        points_balance: newBalance,
+        monthly_eco_points: newMonthlyEcoPoints,
+      })
       .eq('id', profile.id);
 
     if (updateError) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to update balance' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ error: 'Failed to update balance' }, 500);
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        account_number: profile.account_number,
-        user_id: profile.id,
-        item_type,
-        points_added: itemConfig.points,
-        new_balance: newBalance,
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  } catch (error) {
-    return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    if (session) {
+      await supabase
+        .from('recycling_sessions')
+        .update({
+          items_processed: session.items_processed + 1,
+          last_item_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        })
+        .eq('id', session.id);
+    }
+
+    return jsonResponse({
+      success: true,
+      account_number: profile.account_number,
+      user_id: profile.id,
+      session_id: session?.id ?? null,
+      machine_id: session?.machine_id ?? null,
+      item_type,
+      points_added: itemConfig.points,
+      new_balance: newBalance,
+      new_monthly_eco_points: newMonthlyEcoPoints,
+    });
+  } catch (_error) {
+    return jsonResponse({ error: 'Internal server error' }, 500);
   }
 });

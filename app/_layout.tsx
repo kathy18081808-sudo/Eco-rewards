@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
+import { parseMachineCode } from '../lib/machineSessions';
 import { Colors } from '../constants/theme';
 
 function RootLayoutNav() {
@@ -18,7 +20,7 @@ function RootLayoutNav() {
       if (!inAuthGroup) {
         router.replace('/(auth)/login');
       }
-    } else if (profile && !profile.full_name && !profile.alias) {
+    } else if (profile && ((!profile.full_name && !profile.alias) || !profile.city_id)) {
       if (segments.join('/') !== '(auth)/profile-setup') {
         router.replace('/(auth)/profile-setup');
       }
@@ -28,6 +30,26 @@ function RootLayoutNav() {
       }
     }
   }, [session, profile, loading, segments]);
+
+  useEffect(() => {
+    const openMachineLink = (url: string | null) => {
+      if (!url) return;
+      const machineCode = parseMachineCode(url);
+      if (!machineCode) return;
+
+      router.push({
+        pathname: '/scan',
+        params: { machine_code: machineCode },
+      });
+    };
+
+    Linking.getInitialURL().then(openMachineLink);
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      openMachineLink(url);
+    });
+
+    return () => subscription.remove();
+  }, [router]);
 
   return (
     <>
@@ -40,6 +62,8 @@ function RootLayoutNav() {
       >
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="scan" />
+        <Stack.Screen name="session/[id]" />
       </Stack>
     </>
   );
