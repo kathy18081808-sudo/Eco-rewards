@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { signInWithEmail, signInWithGoogle } from '../../lib/auth';
+import { signInWithEmail } from '../../lib/auth';
+import GoogleSignInButton from '../../components/GoogleSignInButton';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function LoginScreen() {
@@ -22,18 +23,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    try {
-      await signInWithGoogle();
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo iniciar sesión con Google');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
 
   const handleEmailLogin = async () => {
     if (!email || !password) {
@@ -121,20 +110,7 @@ export default function LoginScreen() {
             <View style={styles.dividerLine} />
           </View>
 
-          <TouchableOpacity
-            style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
-            onPress={handleGoogleLogin}
-            disabled={googleLoading}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color={Colors.text} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={20} color="#DB4437" />
-                <Text style={styles.googleButtonText}>Continuar con Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <GoogleSignInButton />
 
           <TouchableOpacity
             style={styles.registerLink}
@@ -244,22 +220,6 @@ const styles = StyleSheet.create({
   dividerText: {
     color: Colors.textSecondary,
     fontSize: FontSize.sm,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  googleButtonText: {
-    color: Colors.text,
-    fontSize: FontSize.md,
-    fontWeight: '600',
   },
   registerLink: {
     alignItems: 'center',
