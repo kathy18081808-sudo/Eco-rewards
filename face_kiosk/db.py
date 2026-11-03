@@ -40,9 +40,14 @@ def _now_iso():
 
 def find_profile(identifier: str):
     """Busca un perfil por número de cuenta o por email."""
-    field = "email" if "@" in identifier else "account_number"
+    identifier = identifier.strip()
+    if "@" in identifier:
+        # Los correos de Clerk se guardan en minúsculas
+        field, identifier = "email", identifier.lower()
+    else:
+        field = "account_number"
     rows = _get("profiles", {
-        field: f"eq.{identifier.strip()}",
+        field: f"eq.{identifier}",
         "select": "id,email,alias,full_name,account_number,points_balance",
     })
     return rows[0] if rows else None
