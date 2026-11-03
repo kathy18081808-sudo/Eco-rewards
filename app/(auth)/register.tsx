@@ -44,7 +44,10 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      await signUpWithEmail(email.trim(), password);
+      const { session } = await signUpWithEmail(email.trim(), password);
+      // Si Supabase no pide confirmar el correo, ya hay sesión: la app pasa sola
+      // a completar el perfil, sin mensajes ni pasos extra.
+      if (session) return;
       Alert.alert(
         'Account Created',
         'Please check your email for a verification link, then sign in.',
