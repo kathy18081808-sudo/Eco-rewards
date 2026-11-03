@@ -31,20 +31,11 @@ export default function CityPicker({
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7750/ingest/7e03f6b1-e711-423e-9999-0fc0bde084c6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e31d77'},body:JSON.stringify({sessionId:'e31d77',runId:'city-picker-initial',hypothesisId:'H1,H2,H3,H4',location:'components/CityPicker.tsx:34',message:'CityPicker effect loading cities',data:{currentValue:value},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     fetchCities()
       .then((loadedCities) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7750/ingest/7e03f6b1-e711-423e-9999-0fc0bde084c6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e31d77'},body:JSON.stringify({sessionId:'e31d77',runId:'city-picker-initial',hypothesisId:'H3,H4,H5',location:'components/CityPicker.tsx:39',message:'CityPicker received cities',data:{count:loadedCities.length,firstCity:loadedCities[0]?.name},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         setCities(loadedCities);
       })
       .catch((error) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7750/ingest/7e03f6b1-e711-423e-9999-0fc0bde084c6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e31d77'},body:JSON.stringify({sessionId:'e31d77',runId:'city-picker-initial',hypothesisId:'H1,H2',location:'components/CityPicker.tsx:45',message:'CityPicker failed to load cities',data:{name:error?.name,message:error?.message,code:error?.code},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         setCities([]);
       })
       .finally(() => setLoading(false));
@@ -58,9 +49,6 @@ export default function CityPicker({
       <TouchableOpacity
         style={styles.selector}
         onPress={() => {
-          // #region agent log
-          fetch('http://127.0.0.1:7750/ingest/7e03f6b1-e711-423e-9999-0fc0bde084c6',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e31d77'},body:JSON.stringify({sessionId:'e31d77',runId:'city-picker-initial',hypothesisId:'H4,H5',location:'components/CityPicker.tsx:59',message:'CityPicker opened',data:{loading,citiesCount:cities.length,selectedCity:selectedCity?.name},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           setVisible(true);
         }}
         disabled={loading}

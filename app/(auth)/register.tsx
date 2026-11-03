@@ -29,9 +29,6 @@ export default function RegisterScreen() {
       return;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7383/ingest/1707485f-513b-4f39-85a2-02df44127faa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab5d10'},body:JSON.stringify({sessionId:'ab5d10',runId:'signup-rate-limit',hypothesisId:'H1,H2,H3,H4',location:'app/(auth)/register.tsx:28',message:'register pressed',data:{hasEmail:email.trim().length>0,emailLength:email.trim().length,passwordLength:password.length,confirmPasswordLength:confirmPassword.length,loading},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -47,22 +44,13 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7383/ingest/1707485f-513b-4f39-85a2-02df44127faa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab5d10'},body:JSON.stringify({sessionId:'ab5d10',runId:'signup-rate-limit',hypothesisId:'H1,H2,H4',location:'app/(auth)/register.tsx:46',message:'signup attempt started',data:{emailLength:email.trim().length,passwordLength:password.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       await signUpWithEmail(email.trim(), password);
-      // #region agent log
-      fetch('http://127.0.0.1:7383/ingest/1707485f-513b-4f39-85a2-02df44127faa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab5d10'},body:JSON.stringify({sessionId:'ab5d10',runId:'signup-rate-limit',hypothesisId:'H5',location:'app/(auth)/register.tsx:50',message:'signup attempt succeeded',data:{emailLength:email.trim().length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       Alert.alert(
         'Account Created',
         'Please check your email for a verification link, then sign in.',
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7383/ingest/1707485f-513b-4f39-85a2-02df44127faa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab5d10'},body:JSON.stringify({sessionId:'ab5d10',runId:'signup-rate-limit',hypothesisId:'H1,H2,H3,H4',location:'app/(auth)/register.tsx:58',message:'signup attempt failed in screen',data:{name:error?.name,status:error?.status,code:error?.code,message:error?.message},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       Alert.alert('Registration Failed', getRegistrationErrorMessage(error));
     } finally {
       setLoading(false);

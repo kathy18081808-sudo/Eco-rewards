@@ -27,18 +27,25 @@ export default function ProfileSetupScreen() {
   const [cityId, setCityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const calculateAge = (dob: string): number | null => {
+  // Fecha en formato de El Salvador: DD/MM/AAAA
+  const parseDob = (dob: string): Date | null => {
     const parts = dob.split('/');
-    if (parts.length !== 3) return null;
-    const [month, day, year] = parts.map(Number);
-    const birthDate = new Date(year, month - 1, day);
+    if (parts.length !== 3 || parts[2].length !== 4) return null;
+    const [day, month, year] = parts.map(Number);
+    const date = new Date(year, month - 1, day);
+    const valid =
+      date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+    return valid && date <= new Date() ? date : null;
+  };
+
+  const calculateAge = (birthDate: Date): number => {
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    return age >= 0 ? age : null;
+    return age;
   };
 
   const handleSave = async () => {
@@ -58,14 +65,15 @@ export default function ProfileSetupScreen() {
       let formattedDob: string | null = null;
 
       if (dateOfBirth) {
-        age = calculateAge(dateOfBirth);
-        if (age === null) {
-          Alert.alert('Error', 'Please enter a valid date (MM/DD/YYYY)');
+        const birthDate = parseDob(dateOfBirth);
+        if (!birthDate) {
+          Alert.alert('Error', 'Fecha no válida. Usa el formato DD/MM/AAAA, por ejemplo 18/08/1997');
           setLoading(false);
           return;
         }
-        const parts = dateOfBirth.split('/');
-        formattedDob = `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+        age = calculateAge(birthDate);
+        const [d, m, y] = dateOfBirth.split('/');
+        formattedDob = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
       }
 
       await updateProfile(user!.id, {
@@ -154,7 +162,7 @@ export default function ProfileSetupScreen() {
               <Ionicons name="calendar-outline" size={20} color={Colors.textSecondary} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="MM/DD/YYYY"
+                placeholder="DD/MM/AAAA"
                 placeholderTextColor={Colors.textLight}
                 value={dateOfBirth}
                 onChangeText={formatDateInput}
