@@ -1,3 +1,6 @@
+import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { supabase } from './supabase';
 import { Profile, City } from './database.types';
 
@@ -7,6 +10,41 @@ export async function signUpWithEmail(email: string, password: string) {
     throw error;
   }
   return data;
+}
+
+// Iniciar sesión con Google.
+// - Web: redirige a Google y vuelve a la misma página; Supabase lee la sesión de la URL.
+// - Celular (Expo Go): abre Google en un navegador interno y recibe la sesión de vuelta.
+export async function signInWithGoogle() {
+  if (Platform.OS === 'web') {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) throw error;
+    return;
+  }
+
+  const redirectTo = Linking.createURL('auth-callback');
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo, skipBrowserRedirect: true },
+  });
+  if (error) throw error;
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  if (result.type !== 'success') return; // la persona cerró la ventana
+
+  const params = new URLSearchParams(result.url.split('#')[1] ?? result.url.split('?')[1] ?? '');
+  const errorDescription = params.get('error_description');
+  if (errorDescription) throw new Error(errorDescription);
+
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+  if (access_token && refresh_token) {
+    const { error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token });
+    if (sessionError) throw sessionError;
+  }
 }
 
 export async function signInWithEmail(email: string, password: string) {

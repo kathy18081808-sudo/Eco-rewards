@@ -34,6 +34,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     storage: ExpoSecureStoreAdapter as any,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    // En la web, al volver de Google la sesión llega en la URL y hay que leerla.
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });
