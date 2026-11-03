@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>ECO Rewards</title>
+<style>
+  :root { --verde:#6cc417; --verde-osc:#1f5f2e; --fondo:#14171a; --panel:#1e2327; --texto:#f2f5f0; --gris:#9aa5a0; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; background:var(--fondo); color:var(--texto);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  .app { display:grid; grid-template-columns: 1.15fr 1fr; height:100vh; }
+  .cam { position:relative; background:#000; }
+  .cam img { width:100%; height:100%; object-fit:cover; }
+  .cam .marco { position:absolute; inset:12% 22%; border:4px dashed rgba(255,255,255,.35); border-radius:50%; transition:border-color .3s; }
+  .cam.ok .marco { border-color:var(--verde); border-style:solid; }
+  .panel { display:flex; flex-direction:column; justify-content:center; padding:5vh 4vw; gap:3vh;
+    background:linear-gradient(160deg, var(--panel), var(--fondo)); }
+  .logo { font-weight:800; font-size:4vh; letter-spacing:.05em; }
+  .logo span { color:var(--verde); }
+  .hola { font-size:7vh; font-weight:800; line-height:1.05; }
+  .msg { font-size:3.4vh; color:var(--gris); }
+  .puntos { background:var(--verde-osc); border-radius:3vh; padding:3vh; display:none; }
+  .puntos .n { font-size:11vh; font-weight:900; color:var(--verde); line-height:1; }
+  .puntos .l { font-size:2.6vh; color:#cfe8c4; }
+  .ganados { font-size:3.6vh; font-weight:700; margin-top:1vh; }
+  .fila { display:flex; justify-content:space-between; align-items:center; gap:2vw; }
+  .tiempo { font-size:2.8vh; color:var(--gris); }
+  button { font:inherit; font-size:3vh; font-weight:700; border:0; border-radius:2vh; padding:2vh 3vw;
+    background:var(--verde); color:#0d2210; cursor:pointer; display:none; }
+  .pasos { font-size:2.6vh; color:var(--gris); line-height:1.6; }
+  .pasos b { color:var(--texto); }
+  .pop { animation: pop .5s ease; }
+  @keyframes pop { 50% { transform:scale(1.15); } }
+  .full { position:fixed; top:1.5vh; right:1.5vw; font-size:2vh; padding:1vh 1.5vw; display:block;
+    background:rgba(255,255,255,.12); color:var(--texto); }
+  @media (orientation:portrait) { .app { grid-template-columns:1fr; grid-template-rows:45vh 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="cam" id="cam"><img src="/video" alt="Cámara"><div class="marco"></div></div>
+  <div class="panel">
+    <div class="logo">ECO <span>REWARDS</span></div>
+    <div class="hola" id="hola">¡Hola!</div>
+    <div class="msg" id="msg">Mírame para empezar</div>
+
+    <div class="puntos" id="puntos">
+      <div class="l">TUS ECO PUNTOS</div>
+      <div class="n" id="n">0</div>
+      <div class="ganados" id="ganados"></div>
+    </div>
+
+    <div class="fila">
+      <div class="tiempo" id="tiempo"></div>
+      <button id="terminar">Terminar</button>
+    </div>
+
+    <div class="pasos" id="pasos">
+      <b>1.</b> Mira a la cámara<br>
+      <b>2.</b> Deposita botellas (+15) y latas (+10)<br>
+      <b>¿No te reconoce?</b> Usa tu PIN en el teclado o escanea el QR
+    </div>
+  </div>
+</div>
+<button class="full" id="full">Pantalla completa</button>
+
+<script>
+const $ = id => document.getElementById(id);
+let ultimoSaldo = null;
+
+async function actualizar() {
+  try {
+    const s = await (await fetch('/status', {cache:'no-store'})).json();
+    const activa = s.mode === 'active';
+    $('cam').classList.toggle('ok', activa || s.mode === 'thanks');
+    $('msg').textContent = s.message || '';
+    $('hola').textContent = s.user_name ? `¡Hola, ${s.user_name}!` : (s.mode === 'thanks' ? '¡Listo!' : '¡Hola!');
+    $('puntos').style.display = s.user_name ? 'block' : 'none';
+    $('terminar').style.display = activa ? 'block' : 'none';
+    $('pasos').style.display = s.user_name ? 'none' : 'block';
+    $('tiempo').textContent = activa ? `La sesión se cierra en ${s.seconds_left}s` : '';
+
+    if (s.points_balance != null) {
+      if (ultimoSaldo != null && s.points_balance > ultimoSaldo) {
+        $('n').classList.remove('pop'); void $('n').offsetWidth; $('n').classList.add('pop');
+      }
+      ultimoSaldo = s.points_balance;
+      $('n').textContent = s.points_balance;
+      const g = s.points_balance - (s.points_start ?? s.points_balance);
+      $('ganados').textContent = s.items ? `+${g} pts · ${s.items} ${s.items === 1 ? 'artículo' : 'artículos'}` : '';
+    } else { ultimoSaldo = null; }
+  } catch (e) { $('msg').textContent = 'Sin conexión con el kiosko…'; }
+}
+
+$('terminar').onclick = () => fetch('/end', {method:'POST'});
+$('full').onclick = () => { document.documentElement.requestFullscreen?.(); $('full').style.display='none'; };
+setInterval(actualizar, 700);
+actualizar();
+</script>
+</body>
+</html>
