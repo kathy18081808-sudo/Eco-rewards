@@ -60,12 +60,13 @@ Deno.serve(async (req: Request) => {
     });
     const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    const token = authHeader.replace('Bearer ', '');
-    const { data: userData, error: userError } = await userClient.auth.getUser(token);
-    const user = userData.user;
-    if (userError || !user) {
+    // El token viene de Clerk. Supabase lo valida (Third-Party Auth) al llamar
+    // current_profile_id() con el cliente del usuario; si no es válido, no devuelve perfil.
+    const { data: profileId, error: profileIdError } = await userClient.rpc('current_profile_id');
+    if (profileIdError || !profileId) {
       return jsonResponse({ error: 'Invalid user session' }, 401);
     }
+    const user = { id: profileId as string };
 
     const { data: machine, error: machineError } = await serviceClient
       .from('machines')

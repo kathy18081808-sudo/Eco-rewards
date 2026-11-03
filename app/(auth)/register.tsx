@@ -13,7 +13,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { signUpWithEmail } from '../../lib/auth';
+import { useSignUp } from '@clerk/clerk-expo';
+import { clerkErrorMessage } from '../../lib/clerkErrors';
+import GoogleSignInButton from '../../components/GoogleSignInButton';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function RegisterScreen() {
@@ -24,41 +26,107 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const { signUp, setActive, isLoaded } = useSignUp();
+  const [codeStep, setCodeStep] = useState(false);
+  const [code, setCode] = useState('');
+
   const handleRegister = async () => {
-    if (loading) {
+    if (loading || !isLoaded) {
       return;
     }
 
     if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Error', 'Completa todos los campos');
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      Alert.alert('Error', 'Las contraseñas no coinciden');
       return;
     }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (password.length < 8) {
+      Alert.alert('Error', 'La contraseña debe tener al menos 8 caracteres');
       return;
     }
 
     setLoading(true);
     try {
-      const { session } = await signUpWithEmail(email.trim(), password);
-      // Si Supabase no pide confirmar el correo, ya hay sesión: la app pasa sola
-      // a completar el perfil, sin mensajes ni pasos extra.
-      if (session) return;
-      Alert.alert(
-        'Account Created',
-        'Please check your email for a verification link, then sign in.',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
-    } catch (error: any) {
-      Alert.alert('Registration Failed', getRegistrationErrorMessage(error));
+      const attempt = await signUp!.create({ emailAddress: email.trim(), password });
+      if (attempt.status === 'complete') {
+        // Clerk no pidió verificar el correo: entra directo a completar el perfil.
+        await setActive!({ session: attempt.createdSessionId });
+        return;
+      }
+      await signUp!.prepareEmailAddressVerification({ strategy: 'email_code' });
+      setCodeStep(true);
+    } catch (error) {
+      Alert.alert('No se pudo crear la cuenta', clerkErrorMessage(error));
     } finally {
       setLoading(false);
     }
   };
+
+  const handleVerifyCode = async () => {
+    if (!isLoaded || !code.trim()) return;
+    setLoading(true);
+    try {
+      const attempt = await signUp!.attemptEmailAddressVerification({ code: code.trim() });
+      if (attempt.status === 'complete') {
+        await setActive!({ session: attempt.createdSessionId });
+        return;
+      }
+      Alert.alert('Falta un paso', `Estado del registro: ${attempt.status}`);
+    } catch (error) {
+      Alert.alert('Código no válido', clerkErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (codeStep) {
+    return (
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity style={styles.backButton} onPress={() => { setCodeStep(false); setCode(''); }}>
+            <Ionicons name="arrow-back" size={24} color={Colors.text} />
+          </TouchableOpacity>
+          <View style={styles.header}>
+            <Text style={styles.title}>Verifica tu correo</Text>
+            <Text style={styles.subtitle}>Te enviamos un código de 6 dígitos a {email.trim()}</Text>
+          </View>
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Ionicons name="keypad-outline" size={20} color={Colors.textSecondary} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Código"
+                placeholderTextColor={Colors.textLight}
+                value={code}
+                onChangeText={setCode}
+                keyboardType="number-pad"
+                autoFocus
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleVerifyCode}
+              disabled={loading}
+            >
+              {loading ? <ActivityIndicator color={Colors.surface} /> : <Text style={styles.buttonText}>Verificar y entrar</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.loginLink}
+              onPress={() => signUp?.prepareEmailAddressVerification({ strategy: 'email_code' }).then(
+                () => Alert.alert('Listo', 'Te enviamos un código nuevo.'),
+                (error) => Alert.alert('Error', clerkErrorMessage(error))
+              )}
+            >
+              <Text style={styles.loginText}>¿No te llegó? <Text style={styles.loginTextBold}>Reenviar código</Text></Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -99,7 +167,7 @@ export default function RegisterScreen() {
             <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Password (min. 6 characters)"
+              placeholder="Contraseña (mínimo 8 caracteres)"
               placeholderTextColor={Colors.textLight}
               value={password}
               onChangeText={setPassword}
@@ -138,6 +206,8 @@ export default function RegisterScreen() {
             )}
           </TouchableOpacity>
 
+          <GoogleSignInButton />
+
           <TouchableOpacity
             style={styles.loginLink}
             onPress={() => router.back()}
@@ -151,16 +221,6 @@ export default function RegisterScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
-}
-
-function getRegistrationErrorMessage(error: any) {
-  const message = error?.message || '';
-
-  if (message.toLowerCase().includes('rate limit')) {
-    return 'Too many verification emails were requested. Please wait a few minutes before trying again, or sign in if you already created this account.';
-  }
-
-  return message || 'Could not create account';
 }
 
 const styles = StyleSheet.create({

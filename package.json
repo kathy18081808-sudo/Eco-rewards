@@ -10,6 +10,7 @@
     "build:web": "expo export --platform web"
   },
   "dependencies": {
+    "@clerk/clerk-expo": "^2.20.0",
     "@expo/vector-icons": "^15.1.1",
     "@supabase/supabase-js": "^2.102.1",
     "expo": "~54.0.33",

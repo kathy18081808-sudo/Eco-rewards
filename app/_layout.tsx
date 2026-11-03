@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
+import { ClerkProvider, ClerkLoaded } from '@clerk/clerk-expo';
+import { tokenCache } from '@clerk/clerk-expo/token-cache';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { parseMachineCode } from '../lib/machineSessions';
 import { Colors } from '../constants/theme';
@@ -90,10 +92,24 @@ function RootLayoutNav() {
   );
 }
 
+const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 export default function RootLayout() {
+  if (!CLERK_PUBLISHABLE_KEY) {
+    throw new Error('Falta EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY en las variables de entorno.');
+  }
+
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-    </AuthProvider>
+    <ClerkProvider
+      publishableKey={CLERK_PUBLISHABLE_KEY}
+      // En el celular la sesión se guarda cifrada; en la web Clerk usa sus propias cookies.
+      tokenCache={Platform.OS === 'web' ? undefined : tokenCache}
+    >
+      <ClerkLoaded>
+        <AuthProvider>
+          <RootLayoutNav />
+        </AuthProvider>
+      </ClerkLoaded>
+    </ClerkProvider>
   );
 }

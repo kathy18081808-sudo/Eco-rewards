@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { signInWithEmail } from '../../lib/auth';
+import { useSignIn } from '@clerk/clerk-expo';
+import { clerkErrorMessage } from '../../lib/clerkErrors';
 import GoogleSignInButton from '../../components/GoogleSignInButton';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
@@ -24,20 +25,106 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const { signIn, setActive, isLoaded } = useSignIn();
+  // Clerk puede pedir un código por correo (dispositivo nuevo o segundo factor).
+  const [codeStep, setCodeStep] = useState<null | 'first' | 'second'>(null);
+  const [code, setCode] = useState('');
+
+  const finishSignIn = async (attempt: any) => {
+    if (attempt.status === 'complete') {
+      await setActive!({ session: attempt.createdSessionId });
+      return;
+    }
+
+    const second = attempt.supportedSecondFactors?.find((f: any) => f.strategy === 'email_code');
+    if (second) {
+      await signIn!.prepareSecondFactor({ strategy: 'email_code', emailAddressId: second.emailAddressId } as any);
+      setCodeStep('second');
+      return;
+    }
+
+    const first = attempt.supportedFirstFactors?.find((f: any) => f.strategy === 'email_code');
+    if (first) {
+      await signIn!.prepareFirstFactor({ strategy: 'email_code', emailAddressId: first.emailAddressId });
+      setCodeStep('first');
+      return;
+    }
+
+    throw new Error(`Tu cuenta necesita un paso adicional (${attempt.status}).`);
+  };
+
   const handleEmailLogin = async () => {
+    if (!isLoaded) return;
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Error', 'Escribe tu correo y contraseña');
       return;
     }
     setLoading(true);
     try {
-      await signInWithEmail(email.trim(), password);
-    } catch (error: any) {
-      Alert.alert('Login Failed', error.message || 'Invalid credentials');
+      const attempt = await signIn!.create({ identifier: email.trim(), password });
+      await finishSignIn(attempt);
+    } catch (error) {
+      Alert.alert('No se pudo iniciar sesión', clerkErrorMessage(error, 'Correo o contraseña incorrectos'));
     } finally {
       setLoading(false);
     }
   };
+
+  const handleVerifyCode = async () => {
+    if (!isLoaded || !code.trim()) return;
+    setLoading(true);
+    try {
+      const attempt =
+        codeStep === 'second'
+          ? await signIn!.attemptSecondFactor({ strategy: 'email_code', code: code.trim() } as any)
+          : await signIn!.attemptFirstFactor({ strategy: 'email_code', code: code.trim() });
+      await finishSignIn(attempt);
+    } catch (error) {
+      Alert.alert('Código no válido', clerkErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (codeStep) {
+    return (
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="mail-unread-outline" size={48} color={Colors.surface} />
+            </View>
+            <Text style={styles.title}>Revisa tu correo</Text>
+            <Text style={styles.subtitle}>Te enviamos un código a {email.trim()}</Text>
+          </View>
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Ionicons name="keypad-outline" size={20} color={Colors.textSecondary} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Código de 6 dígitos"
+                placeholderTextColor={Colors.textLight}
+                value={code}
+                onChangeText={setCode}
+                keyboardType="number-pad"
+                autoFocus
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleVerifyCode}
+              disabled={loading}
+            >
+              {loading ? <ActivityIndicator color={Colors.surface} /> : <Text style={styles.buttonText}>Verificar</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.registerLink} onPress={() => { setCodeStep(null); setCode(''); }}>
+              <Text style={styles.registerText}>Volver</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView

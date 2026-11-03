@@ -1,132 +1,59 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { Text, TouchableOpacity, ActivityIndicator, StyleSheet, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
-import { signInWithGoogle } from '../lib/auth';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
+import { useSignIn, useSSO } from '@clerk/clerk-expo';
 import { Colors, Spacing, BorderRadius, FontSize } from '../constants/theme';
+import { clerkErrorMessage } from '../lib/clerkErrors';
 
-const GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
-const BUTTON_ID = 'google-signin-button';
-
-declare global {
-  interface Window {
-    google?: any;
-  }
-}
-
-async function sha256Hex(text: string) {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(bytes))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function loadGoogleScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.id) return resolve();
-    const existing = document.querySelector('script[data-google-gsi]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.dataset.googleGsi = 'true';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('No se pudo cargar Google'));
-    document.head.appendChild(script);
-  });
-}
+// Cierra la ventana de Google al volver a la app (solo afecta al celular).
+WebBrowser.maybeCompleteAuthSession();
 
 /**
- * En la web usa el botón oficial de Google (Google Identity Services):
- * la ventana de Google muestra el dominio de la app (eco-rewards-web.vercel.app)
- * en lugar del dominio de Supabase. El token se valida con Supabase (signInWithIdToken).
- * En el celular, o si falta EXPO_PUBLIC_GOOGLE_CLIENT_ID, usa el método por redirección.
+ * "Continuar con Google" usando Clerk.
+ * - Web: redirige a Google y vuelve a /sso-callback, donde Clerk crea la sesión.
+ * - Celular: abre Google en un navegador interno y activa la sesión al volver.
+ * Sirve tanto para iniciar sesión como para registrarse por primera vez.
  */
 export default function GoogleSignInButton() {
-  const useGoogleButton = Platform.OS === 'web' && !!GOOGLE_CLIENT_ID;
+  const { signIn, isLoaded } = useSignIn();
+  const { startSSOFlow } = useSSO();
   const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    if (!useGoogleButton) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        await loadGoogleScript();
-        const rawNonce = crypto.randomUUID();
-        const hashedNonce = await sha256Hex(rawNonce);
-        if (cancelled) return;
-
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          nonce: hashedNonce,
-          use_fedcm_for_prompt: true,
-          callback: async (response: { credential: string }) => {
-            setLoading(true);
-            const { error } = await supabase.auth.signInWithIdToken({
-              provider: 'google',
-              token: response.credential,
-              nonce: rawNonce,
-            });
-            setLoading(false);
-            if (error) Alert.alert('Error', error.message);
-          },
-        });
-
-        const container = document.getElementById(BUTTON_ID);
-        if (container) {
-          container.innerHTML = '';
-          window.google.accounts.id.renderButton(container, {
-            type: 'standard',
-            theme: 'outline',
-            size: 'large',
-            shape: 'rectangular',
-            text: 'continue_with',
-            logo_alignment: 'center',
-            locale: 'es',
-            width: Math.min(container.offsetWidth || 360, 400),
-          });
-        }
-        setReady(true);
-      } catch {
-        setReady(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [useGoogleButton]);
-
-  const handleRedirectLogin = async () => {
+  const handlePress = async () => {
+    if (!isLoaded) return;
     setLoading(true);
     try {
-      await signInWithGoogle();
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo iniciar sesión con Google');
+      if (Platform.OS === 'web') {
+        const origin = window.location.origin;
+        await signIn.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: `${origin}/sso-callback`,
+          redirectUrlComplete: `${origin}/`,
+        });
+        return; // el navegador se va a Google
+      }
+
+      const { createdSessionId, setActive } = await startSSOFlow({
+        strategy: 'oauth_google',
+        redirectUrl: Linking.createURL('sso-callback'),
+      });
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+      }
+    } catch (error) {
+      Alert.alert('Error', clerkErrorMessage(error, 'No se pudo iniciar sesión con Google'));
     } finally {
       setLoading(false);
     }
   };
 
-  if (useGoogleButton) {
-    return (
-      <View style={styles.wrapper}>
-        <View nativeID={BUTTON_ID} style={styles.googleContainer} />
-        {(!ready || loading) && <ActivityIndicator color={Colors.textSecondary} style={styles.spinner} />}
-      </View>
-    );
-  }
-
   return (
     <TouchableOpacity
-      style={[styles.button, loading && styles.disabled]}
-      onPress={handleRedirectLogin}
-      disabled={loading}
+      style={[styles.button, (loading || !isLoaded) && styles.disabled]}
+      onPress={handlePress}
+      disabled={loading || !isLoaded}
     >
       {loading ? (
         <ActivityIndicator color={Colors.text} />
@@ -141,19 +68,6 @@ export default function GoogleSignInButton() {
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    alignItems: 'center',
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  googleContainer: {
-    width: '100%',
-    maxWidth: 400,
-    alignItems: 'center',
-  },
-  spinner: {
-    marginTop: Spacing.sm,
-  },
   button: {
     flexDirection: 'row',
     gap: Spacing.sm,
