@@ -54,15 +54,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
+    // No se debe esperar (await) una consulta de Supabase dentro de este callback:
+    // en el navegador, supabase-js mantiene un candado de sesión mientras el callback corre,
+    // y cualquier otra petición (por ejemplo guardar el perfil) se queda esperando para siempre.
+    // Por eso la consulta del perfil se lanza fuera del callback con setTimeout.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         setSession(session);
         if (session?.user?.id) {
-          await fetchProfile(session.user.id);
+          const userId = session.user.id;
+          setTimeout(() => {
+            fetchProfile(userId).finally(() => setLoading(false));
+          }, 0);
         } else {
           setProfile(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
