@@ -1,0 +1,7 @@
+# onnxruntime NO va aquí: en la Jetson se instala onnxruntime-gpu desde el índice de NVIDIA
+# (ver README.md). En una PC normal: pip install onnxruntime
+insightface==0.7.3
+opencv-python
+numpy
+requests
+python-dotenv

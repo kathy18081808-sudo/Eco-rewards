@@ -1,0 +1,6 @@
+.env
+faces_db.json
+faces_db.pkl
+faces_db.tmp
+__pycache__/
+venv/
