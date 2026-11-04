@@ -21,6 +21,8 @@ export interface Profile {
   monthly_eco_points: number;
   city_id: string | null;
   role: 'user' | 'admin';
+  face_consent_at?: string | null;
+  clerk_user_id?: string | null;
   created_at: string;
   updated_at: string;
   city?: City | null;

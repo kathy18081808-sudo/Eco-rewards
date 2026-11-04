@@ -1,3 +1,7 @@
+> **Versión anterior (Python).** El reconocimiento facial ahora funciona dentro de la app web:
+> los usuarios registran su rostro en *Perfil → Mi rostro* y la máquina usa `eco-rewards-web.vercel.app/kiosko`.
+> Los rostros registrados en la web no son compatibles con este programa.
+
 # Reconocimiento facial — EcoRewards
 
 La laptop reconoce la cara del usuario con la webcam y **arma una sesión de reciclaje**

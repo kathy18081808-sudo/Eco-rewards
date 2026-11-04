@@ -35,8 +35,8 @@ function RootLayoutNav() {
   const router = useRouter();
 
   useEffect(() => {
-    // La encuesta es pública: se puede abrir con o sin cuenta.
-    if (segments[0] === 'encuesta') return;
+    // La encuesta y el kiosko son públicos: se abren con o sin cuenta.
+    if (segments[0] === 'encuesta' || segments[0] === 'kiosko') return;
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
@@ -90,6 +90,8 @@ function RootLayoutNav() {
         <Stack.Screen name="scan" />
         <Stack.Screen name="session/[id]" />
         <Stack.Screen name="encuesta" />
+        <Stack.Screen name="kiosko" />
+        <Stack.Screen name="rostro" />
       </Stack>
     </>
   );

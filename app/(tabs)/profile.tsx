@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { updateProfile, signOut, fetchCities } from '../../lib/auth';
 import { fetchUserMedals } from '../../lib/ranking';
@@ -22,6 +23,7 @@ import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function ProfileScreen() {
   const { user, profile, refreshProfile } = useAuth();
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [alias, setAlias] = useState(profile?.alias || '');
@@ -303,6 +305,17 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        <TouchableOpacity style={styles.faceButton} onPress={() => router.push('/rostro')}>
+          <Ionicons name="scan-outline" size={22} color={Colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.faceTitle}>Mi rostro</Text>
+            <Text style={styles.faceSubtitle}>
+              {profile?.face_consent_at ? 'Registrado · la máquina te reconoce' : 'Regístralo para identificarte en la máquina'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
           <Ionicons name="log-out-outline" size={20} color={Colors.error} />
           <Text style={styles.signOutText}>Sign Out</Text>
@@ -569,6 +582,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.md,
+  },
+  faceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.md,
+  },
+  faceTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  faceSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
   },
   signOutButton: {
     flexDirection: 'row',
