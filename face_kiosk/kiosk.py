@@ -17,7 +17,7 @@ import numpy as np
 from flask import Flask, Response, jsonify, send_from_directory
 
 import db
-from face_engine import FaceEngine, draw_face, face_is_usable
+from face_engine import FaceEngine, draw_face, face_is_usable, open_camera
 
 CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", "0"))
 MATCH_THRESHOLD = float(os.environ.get("MATCH_THRESHOLD", "0.42"))  # coseno SFace (oficial: 0.363)
@@ -60,7 +60,7 @@ def get_state():
 def camera_loop(machine):
     global latest_jpeg
     engine = FaceEngine()
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    cap = open_camera(CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     if not cap.isOpened():

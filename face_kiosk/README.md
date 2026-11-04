@@ -11,6 +11,14 @@ Webcam ──USB──► Laptop (kiosk.py) ──crea sesión──► Supabase
                     └──WiFi──► Tablet (navegador)      └──── add-points ◄───────┘
 ```
 
+## Inicio rápido en Windows (doble clic)
+
+1. `1_instalar.bat`: instala todo (requiere Python 3.11/3.12 con "Add Python to PATH").
+2. Abre `.env` con el Bloc de notas y pega `SUPABASE_SERVICE_ROLE_KEY`.
+3. `2_probar_camara.bat`: muestra cada cámara; anota el número de la webcam y ponlo en `CAMERA_INDEX` del `.env`.
+4. `3_registrar_cara.bat`: escribe el correo de la persona y sigue las indicaciones.
+5. `4_iniciar_kiosko.bat`: abre en la tablet la dirección que muestra.
+
 ## 1. Base de datos (una sola vez)
 
 En Supabase → SQL Editor, ejecuta `supabase/migrations/006_face_recognition.sql`.

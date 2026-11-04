@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 import db
-from face_engine import FaceEngine, draw_face, face_is_usable
+from face_engine import FaceEngine, draw_face, face_is_usable, open_camera
 
 SAMPLES = 5
 SECONDS_BETWEEN_SAMPLES = 0.8
@@ -43,7 +43,7 @@ def main():
         return
 
     engine = FaceEngine()
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    cap = open_camera(CAMERA_INDEX)
     if not cap.isOpened():
         raise SystemExit("No se pudo abrir la webcam. Prueba con CAMERA_INDEX=1")
 

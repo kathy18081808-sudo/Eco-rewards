@@ -1,4 +1,5 @@
 """Detección y reconocimiento facial con OpenCV (YuNet + SFace)."""
+import sys
 from pathlib import Path
 
 import cv2
@@ -52,3 +53,12 @@ def draw_face(frame, face, label: str = "", color=(80, 200, 80)):
     if label:
         cv2.putText(frame, label, (x, max(20, y - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+
+def open_camera(index: int):
+    """Abre la webcam. En Windows usa DirectShow: abre más rápido y evita errores de MSMF."""
+    if sys.platform.startswith("win"):
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            return cap
+    return cv2.VideoCapture(index)
