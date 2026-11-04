@@ -20,6 +20,16 @@ Webcam USB ──► Jetson (first_contact.py, InsightFace en GPU)
   suma puntos en la **cuenta de la app web** de esa persona.
 - Con `SIN_CONEXION=1` funciona solo como demostración de reconocimiento, sin internet.
 
+## En una PC con Windows (doble clic)
+
+1. Python **3.11** desde python.org, con "Add Python to PATH".
+2. `1_instalar.bat`. Si dice que no pudo instalar insightface, instala *Build Tools for Visual Studio*
+   con "Desarrollo para el escritorio con C++", reinicia y vuelve a abrirlo.
+3. Abre `.env` con el Bloc de notas y pega `SUPABASE_SERVICE_ROLE_KEY` (y `CAMARA` si la webcam no es la 0).
+4. `2_registrar.bat` → `3_reconocer.bat` (o `3_reconocer_sin_conexion.bat` para probar sin internet).
+
+En Windows se usa la CPU (`onnxruntime`); funciona bien con `DET_SIZE=320` o `480`.
+
 ---
 
 ## 1. Requisitos
