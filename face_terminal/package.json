@@ -1,0 +1,13 @@
+{
+  "name": "eco-rewards-face-terminal",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@napi-rs/canvas": "0.1.80",
+    "@tensorflow/tfjs": "1.7.4",
+    "face-api.js": "0.22.2"
+  },
+  "overrides": {
+    "@tensorflow/tfjs-core": "1.7.4"
+  }
+}

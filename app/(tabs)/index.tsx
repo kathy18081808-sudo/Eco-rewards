@@ -6,6 +6,8 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +19,7 @@ import { Transaction } from '../../lib/database.types';
 import PointsCard from '../../components/PointsCard';
 import TransactionItem from '../../components/TransactionItem';
 import AccountNumberModal from '../../components/AccountNumberModal';
+import { countFaceSamples, createFaceRequest, FACE_MACHINE_CODE } from '../../lib/machineFace';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function HomeScreen() {
@@ -27,6 +30,8 @@ export default function HomeScreen() {
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [stats, setStats] = useState({ bottles: 0, cans: 0 });
   const [cityBattleRank, setCityBattleRank] = useState<number | null>(null);
+  const [faceRequestId, setFaceRequestId] = useState<string | null>(null);
+  const [activatingFace, setActivatingFace] = useState(false);
 
   const fetchTransactions = useCallback(async () => {
     if (!user) return;
@@ -84,6 +89,61 @@ export default function HomeScreen() {
     fetchStats();
     fetchCityRank();
   }, [fetchTransactions, fetchStats, fetchCityRank]);
+
+  const activateWithFace = useCallback(async () => {
+    if (!user || activatingFace || faceRequestId) return;
+    setActivatingFace(true);
+    try {
+      const samples = await countFaceSamples(user.id);
+      if (samples < 1) {
+        Alert.alert(
+          'Falta tu rostro',
+          'En Perfil, abre Mi rostro y regístralo. Después vuelve aquí.',
+        );
+        return;
+      }
+      const request = await createFaceRequest(user.id);
+      setFaceRequestId(request.id);
+    } catch (error: any) {
+      Alert.alert('No se pudo activar', error?.message || 'Inténtalo de nuevo.');
+    } finally {
+      setActivatingFace(false);
+    }
+  }, [user, activatingFace, faceRequestId]);
+
+  useEffect(() => {
+    if (!faceRequestId) return;
+    let stopped = false;
+
+    const look = async () => {
+      const { data, error } = await supabase
+        .from('face_requests')
+        .select('id, status, session_id, error, expires_at')
+        .eq('id', faceRequestId)
+        .single();
+      if (stopped || error || !data) return;
+      if (data.status === 'matched' && data.session_id) {
+        setFaceRequestId(null);
+        router.push({ pathname: '/session/[id]', params: { id: data.session_id } });
+        return;
+      }
+      const expired = new Date(data.expires_at).getTime() < Date.now();
+      if (data.status === 'failed' || data.status === 'expired' || expired) {
+        setFaceRequestId(null);
+        Alert.alert(
+          'La máquina no te reconoció',
+          data.error || 'Ponte frente a la cámara de la máquina y vuelve a pulsar el botón.',
+        );
+      }
+    };
+
+    look();
+    const timer = setInterval(look, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [faceRequestId, router]);
 
   // Realtime subscription for live point updates
   useEffect(() => {
@@ -192,6 +252,23 @@ export default function HomeScreen() {
             <Text style={styles.recycleButtonText}>Scan Machine QR</Text>
           </View>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.faceButton, faceRequestId ? styles.faceButtonBusy : null]}
+          onPress={activateWithFace}
+          activeOpacity={0.8}
+          disabled={activatingFace || !!faceRequestId}
+        >
+          {activatingFace || faceRequestId ? (
+            <ActivityIndicator color={Colors.primaryDark} />
+          ) : (
+            <Ionicons name="scan-outline" size={18} color={Colors.primaryDark} />
+          )}
+          <Text style={styles.faceButtonText}>
+            {faceRequestId ? 'Mira a la cámara de la máquina…' : 'Activar con mi rostro'}
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.faceHint}>Máquina {FACE_MACHINE_CODE}</Text>
 
         <TouchableOpacity
           style={styles.fallbackButton}
@@ -322,6 +399,34 @@ const styles = StyleSheet.create({
     color: Colors.surface,
     fontSize: FontSize.lg,
     fontWeight: '700',
+  },
+  faceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  faceButtonBusy: {
+    borderColor: Colors.primaryDark,
+    backgroundColor: Colors.primaryLight,
+  },
+  faceButtonText: {
+    color: Colors.primaryDark,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+  },
+  faceHint: {
+    marginTop: 6,
+    textAlign: 'center',
+    color: Colors.textSecondary,
+    fontSize: FontSize.xs,
   },
   fallbackButton: {
     flexDirection: 'row',

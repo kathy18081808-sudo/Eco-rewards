@@ -2,5 +2,7 @@
 faces_db.json
 faces_db.pkl
 faces_db.tmp
+.frame.jpg
 __pycache__/
 venv/
+node_modules/

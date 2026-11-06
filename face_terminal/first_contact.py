@@ -1,23 +1,26 @@
-"""Reconocimiento facial de Eco-Rewards desde la terminal (InsightFace + webcam).
+"""Reconocimiento facial de Eco-Rewards desde la terminal (webcam).
 
-Las caras se guardan en un documento JSON local (faces_db.json). Si hay conexión,
-al reconocer a alguien se abre su sesión de reciclaje en la máquina (Supabase) y la
-ESP32 la toma igual que con el código QR: los puntos van a su cuenta de la app web.
+Con conexión, `reconocer` espera el botón "Activar con mi rostro" de la app
+(o la tecla ESPACIO, que hace de botón de la máquina). Compara la webcam con
+los vectores de 128 números que guardó "Mi rostro" y abre la sesión. La ESP32
+la toma igual que con el código QR y los puntos van a esa cuenta.
+
+Sin conexión, sigue el modo local de InsightFace (faces_db.json).
 
 Uso:
-  python first_contact.py registrar <cuenta>   # correo o número de cuenta (ej. 100001)
-  python first_contact.py reconocer            # reconoce en vivo y abre la sesión
-  python first_contact.py listar               # muestra las personas registradas
-  python first_contact.py borrar <cuenta>      # borra la cara de una persona
+  python first_contact.py reconocer            # espera el botón de la app
+  python first_contact.py registrar <cuenta>   # registro local (sin conexión)
+  python first_contact.py listar               # muestra las personas locales
+  python first_contact.py borrar <cuenta>      # borra una cara local
 
 Opciones (variables de entorno o archivo .env):
   CAMARA=1                    número de cámara (o ruta /dev/v4l/by-id/... en Linux)
   SIN_CONEXION=1              solo reconocimiento local, sin abrir sesiones
-  DET_SIZE=320                tamaño de detección (más bajo = más rápido en la Jetson)
-  UMBRAL=0.45                 similitud mínima para aceptar una cara
+  DET_SIZE=320                tamaño de detección local (más bajo = más rápido)
+  UMBRAL=0.45                 distancia máxima del vector de "Mi rostro"
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MACHINE_CODE   (ver .env.example)
 
-Teclas en la ventana de reconocer:  T = terminar sesión,  Q / ESC = salir
+Teclas: ESPACIO = identificar a cualquiera, T = terminar sesión, Q / ESC = salir
 """
 
 # --- Arreglo de cuDNN (Linux + GPU): debe ir ANTES de importar cv2 / onnxruntime / insightface ---
@@ -44,6 +47,7 @@ if sys.platform.startswith("linux") and os.path.isdir(_CUDNN):
 
 import json
 import pickle
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -355,7 +359,205 @@ class Sesion:
             time.sleep(1.5)
 
 
+class DescriptorApp:
+    """Mismo vector de 128 números que guarda 'Mi rostro' en el navegador."""
+
+    def __init__(self):
+        script = BASE / "descriptor_server.mjs"
+        if not (BASE / "node_modules" / "face-api.js").exists():
+            sys.exit(
+                "Faltan las librerías del vector de 'Mi rostro'. "
+                "En face_terminal ejecuta: npm install"
+            )
+        self.listo = threading.Event()
+        self.proc = subprocess.Popen(
+            ["node", str(script)],
+            cwd=BASE,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        threading.Thread(target=self._leer_errores, daemon=True).start()
+        if not self.listo.wait(120):
+            self.cerrar()
+            sys.exit("El modelo de 'Mi rostro' no arrancó. Revisa: npm install")
+
+    def _leer_errores(self):
+        for linea in self.proc.stderr:
+            texto = linea.rstrip()
+            if texto:
+                print(texto)
+            if "listos" in texto:
+                self.listo.set()
+
+    def vector(self, frame):
+        foto = BASE / ".frame.jpg"
+        cv2.imwrite(str(foto), frame)
+        self.proc.stdin.write(str(foto) + "\n")
+        self.proc.stdin.flush()
+        linea = self.proc.stdout.readline()
+        if not linea or linea.strip() == "null":
+            return None
+        return np.asarray(json.loads(linea), dtype=np.float32)
+
+    def cerrar(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+
+
+def distancia(a, b) -> float:
+    d = np.asarray(a, dtype=np.float32) - np.asarray(b, dtype=np.float32)
+    return float(np.sqrt(np.dot(d, d)))
+
+
+def reconocer_con_app():
+    """Espera el botón de la app (o ESPACIO) y abre la sesión de esa persona."""
+    sesion = Sesion()
+    maquina = sesion.maquina
+    print(f"Conectado a Eco-Rewards. Máquina: {maquina['name']} ({maquina['machine_code']})")
+    print("Esperando 'Activar con mi rostro' en la app. ESPACIO identifica a cualquiera.")
+
+    descriptor = DescriptorApp()
+    cap = abrir_camara()
+    rostros = {}
+    actualizado = 0.0
+    busqueda = None
+    racha_id, racha = None, 0
+
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            ahora = time.time()
+            if ahora - actualizado > 2:
+                actualizado = ahora
+                try:
+                    rostros = {}
+                    for fila in ecorewards.rostros_de_la_app():
+                        muestra = fila["embedding"]
+                        if isinstance(muestra, str):
+                            muestra = json.loads(muestra) if muestra.startswith("[") else [
+                                float(x) for x in muestra.strip("{}").split(",") if x
+                            ]
+                        rostros.setdefault(fila["user_id"], []).append(muestra)
+                    if busqueda is None:
+                        pendientes = ecorewards.peticiones_pendientes(maquina["id"])
+                        if pendientes:
+                            pet = pendientes[0]
+                            busqueda = {
+                                "user_id": pet["user_id"],
+                                "request_id": pet["id"],
+                                "hasta": datetime.fromisoformat(
+                                    pet["expires_at"].replace("Z", "+00:00")
+                                ).timestamp(),
+                            }
+                            racha_id, racha = None, 0
+                            print("La app pidió reconocer un rostro. Mira a la cámara.")
+                except Exception as e:
+                    sesion.mensaje = f"Sin conexión: {e}"
+
+            etiqueta = None
+            if busqueda and ahora > busqueda["hasta"]:
+                if busqueda.get("request_id"):
+                    try:
+                        ecorewards.cerrar_peticion(busqueda["request_id"], "expired", error="tiempo agotado")
+                    except Exception as e:
+                        print(e)
+                print("No se reconoció a tiempo.")
+                busqueda = None
+                racha_id, racha = None, 0
+            elif busqueda:
+                vector = descriptor.vector(frame)
+                candidatos = (
+                    {busqueda["user_id"]: rostros.get(busqueda["user_id"], [])}
+                    if busqueda.get("user_id")
+                    else rostros
+                )
+                mejor_id, mejor_d = None, UMBRAL
+                if vector is not None:
+                    for user_id, muestras in candidatos.items():
+                        for muestra in muestras:
+                            d = distancia(vector, muestra)
+                            if d < mejor_d:
+                                mejor_id, mejor_d = user_id, d
+                if mejor_id and mejor_id == racha_id:
+                    racha += 1
+                else:
+                    racha_id, racha = mejor_id, (1 if mejor_id else 0)
+                if mejor_id:
+                    etiqueta = f"coincide ({mejor_d:.2f})"
+                elif vector is not None:
+                    etiqueta = "no coincide"
+                else:
+                    etiqueta = "sin cara"
+                if mejor_id and racha >= CONFIRMAR and not sesion.info and not sesion._ocupado:
+                    persona = {"profile_id": mejor_id, "nombre": "Reciclador", "cuenta": mejor_id}
+                    try:
+                        persona["nombre"] = ecorewards.nombre(ecorewards.perfil_por_id(mejor_id))
+                    except Exception:
+                        pass
+                    request_id = busqueda.get("request_id")
+                    sesion.abrir(persona)
+                    if request_id:
+                        def marcar(rid=request_id, pid=mejor_id):
+                            for _ in range(20):
+                                time.sleep(0.4)
+                                activa = ecorewards.sesion_activa(maquina["id"])
+                                if activa and activa["user_id"] == pid:
+                                    ecorewards.cerrar_peticion(rid, "matched", session_id=activa["id"])
+                                    return
+                            ecorewards.cerrar_peticion(rid, "failed", error="no se pudo abrir la sesión")
+                        threading.Thread(target=marcar, daemon=True).start()
+                    busqueda = None
+                    racha_id, racha = None, 0
+
+            if sesion.info:
+                info = sesion.info
+                ganados = info["puntos"] - info["inicio"]
+                lineas = [
+                    f"Hola, {info['nombre']}!",
+                    f"{info['puntos']} pts  (+{ganados})  articulos: {info['items']}",
+                    f"Deposita tus botellas y latas - cierra en {info['segundos']}s",
+                ]
+                fondo = (40, 110, 40)
+            elif busqueda:
+                lineas = [etiqueta or "Mira a la camara"]
+                fondo = (40, 70, 110)
+            else:
+                lineas = ["Esperando el boton de la app", "ESPACIO = identificar a cualquiera"]
+                fondo = (50, 50, 50)
+            if sesion.mensaje and not sesion.info:
+                lineas.append(sesion.mensaje[:70])
+            alto = 30 + 32 * len(lineas)
+            cv2.rectangle(frame, (0, frame.shape[0] - alto), (frame.shape[1], frame.shape[0]), fondo, -1)
+            for i, texto in enumerate(lineas):
+                cv2.putText(
+                    frame, texto, (20, frame.shape[0] - alto + 35 + 32 * i),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
+                )
+            cv2.imshow("Reconocer - Eco-Rewards", frame)
+            k = cv2.waitKey(1) & 0xFF
+            if k in (ord("q"), 27):
+                break
+            if k == ord("t"):
+                sesion.terminar()
+            if k == 32 and busqueda is None and not sesion.info:
+                busqueda = {"user_id": None, "request_id": None, "hasta": time.time() + 25}
+                racha_id, racha = None, 0
+                print("Botón de la máquina: identificando a cualquiera durante 25 s.")
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        descriptor.cerrar()
+
+
 def reconocer():
+    if not SIN_CONEXION:
+        reconocer_con_app()
+        return
     db = cargar_db()
     if not db["personas"]:
         sys.exit("No hay caras registradas. Primero: python first_contact.py registrar <cuenta>")

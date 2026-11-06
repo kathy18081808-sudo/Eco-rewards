@@ -18,6 +18,13 @@ Webcam USB ──► Jetson (first_contact.py, InsightFace en GPU)
 - Cuando reconoce a alguien, crea una sesión `source = 'face'` en Supabase.
   La ESP32 la toma igual que cuando se escanea el QR, y cada botella o lata
   suma puntos en la **cuenta de la app web** de esa persona.
+- Con conexión, `reconocer` espera el botón **Activar con mi rostro** de la app
+  (inicio, debajo de Scan Machine QR) o la tecla **ESPACIO** en la ventana.
+  Compara la webcam con el vector de 128 números que guardó **Mi rostro** y abre
+  la sesión `source = 'face'`. InsightFace y `faces_db.json` siguen para el modo
+  sin conexión: ese vector de 512 números no coincide con el de Mi rostro.
+- Antes de `reconocer` con conexión, en `face_terminal`: `npm install`
+  (usa los mismos modelos que la web, en `public/models`).
 - Con `SIN_CONEXION=1` funciona solo como demostración de reconocimiento, sin internet.
 
 ## En una PC con Windows (doble clic)

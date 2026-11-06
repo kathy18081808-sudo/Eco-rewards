@@ -139,3 +139,36 @@ def terminar_sesion(session_id: str):
         json={"status": "completed"},
         timeout=TIMEOUT,
     ).raise_for_status()
+
+
+# ---------------------------------------------------------------- rostros de la app (face-api, 128)
+
+def rostros_de_la_app():
+    """Vectores que guardó 'Mi rostro'. Cada fila: user_id y una lista de 128 números."""
+    return _get("face_embeddings", {
+        "model": "eq.faceapi",
+        "select": "user_id,embedding",
+    })
+
+
+def peticiones_pendientes(machine_id: str):
+    return _get("face_requests", {
+        "machine_id": f"eq.{machine_id}",
+        "status": "eq.pending",
+        "expires_at": f"gt.{_ahora()}",
+        "select": "id,user_id,expires_at",
+        "order": "created_at.asc",
+    })
+
+
+def cerrar_peticion(request_id: str, status: str, session_id: str | None = None, error: str | None = None):
+    cuerpo = {"status": status, "error": error}
+    if session_id:
+        cuerpo["session_id"] = session_id
+    requests.patch(
+        _rest("face_requests"),
+        headers=_headers(),
+        params={"id": f"eq.{request_id}"},
+        json=cuerpo,
+        timeout=TIMEOUT,
+    ).raise_for_status()
