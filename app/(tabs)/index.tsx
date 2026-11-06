@@ -105,7 +105,10 @@ export default function HomeScreen() {
       const request = await createFaceRequest(user.id);
       setFaceRequestId(request.id);
     } catch (error: any) {
-      Alert.alert('No se pudo activar', error?.message || 'Inténtalo de nuevo.');
+      const detail = [error?.message, error?.details, error?.hint, error?.code]
+        .filter(Boolean)
+        .join('\n');
+      Alert.alert('No se pudo activar', detail || 'Inténtalo de nuevo.');
     } finally {
       setActivatingFace(false);
     }

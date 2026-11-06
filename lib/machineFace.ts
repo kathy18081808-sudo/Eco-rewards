@@ -2,6 +2,12 @@ import { supabase } from './supabase';
 
 export const FACE_MACHINE_CODE = 'ECO-48FM6V';
 
+function explain(error: { message?: string; details?: string; hint?: string; code?: string } | null) {
+  if (!error) return 'respuesta vacía de la base de datos';
+  const text = [error.message, error.details, error.hint, error.code].filter(Boolean).join(' — ');
+  return text || JSON.stringify(error);
+}
+
 export type FaceRequestStatus = 'pending' | 'matched' | 'failed' | 'expired';
 
 export interface FaceRequestRow {
@@ -15,13 +21,13 @@ export interface FaceRequestRow {
 }
 
 export async function countFaceSamples(userId: string) {
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from('face_embeddings')
-    .select('id', { count: 'exact', head: true })
+    .select('id')
     .eq('user_id', userId)
     .eq('model', 'faceapi');
-  if (error) throw new Error(error.message);
-  return count ?? 0;
+  if (error) throw new Error(explain(error));
+  return data?.length ?? 0;
 }
 
 export async function createFaceRequest(userId: string) {
@@ -31,7 +37,7 @@ export async function createFaceRequest(userId: string) {
     .eq('machine_code', FACE_MACHINE_CODE)
     .eq('is_active', true)
     .maybeSingle();
-  if (machineError) throw new Error(machineError.message);
+  if (machineError) throw new Error(explain(machineError));
   if (!machine) throw new Error(`No hay una máquina activa ${FACE_MACHINE_CODE}.`);
 
   const { error: deleteError } = await supabase
@@ -39,13 +45,13 @@ export async function createFaceRequest(userId: string) {
     .delete()
     .eq('user_id', userId)
     .eq('status', 'pending');
-  if (deleteError) throw new Error(deleteError.message);
+  if (deleteError) throw new Error(explain(deleteError));
 
   const { data, error } = await supabase
     .from('face_requests')
     .insert({ machine_id: machine.id, user_id: userId, status: 'pending' })
-    .select('id, machine_id, user_id, status, session_id, error, expires_at')
+    .select('id, machine_id, user_id, status, session_id, expires_at')
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(explain(error));
   return data as FaceRequestRow;
 }
