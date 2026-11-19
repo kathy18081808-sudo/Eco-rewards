@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
-import { ClerkProvider, ClerkLoaded } from '@clerk/clerk-expo';
+import { ClerkProvider } from '@clerk/clerk-expo';
 import { tokenCache } from '@clerk/clerk-expo/token-cache';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { parseMachineCode } from '../lib/machineSessions';
@@ -29,14 +29,25 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   };
 }
 
+function isPublicRoute(pathname: string, segments: readonly string[]) {
+  const first = segments[0];
+  if (first === 'encuesta' || first === 'kiosko') return true;
+  const path =
+    pathname ||
+    (Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.pathname : '');
+  return path === '/encuesta' || path.startsWith('/encuesta/') || path === '/kiosko' || path.startsWith('/kiosko/');
+}
+
 function RootLayoutNav() {
   const { session, profile, loading } = useAuth();
   const segments = useSegments();
+  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
-    // La encuesta y el kiosko son públicos: se abren con o sin cuenta.
-    if (segments[0] === 'encuesta' || segments[0] === 'kiosko') return;
+    // La encuesta y el kiosko son públicos: se abren con o sin cuenta,
+    // aunque Clerk todavía no haya terminado de cargar.
+    if (isPublicRoute(pathname, segments)) return;
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
@@ -54,7 +65,7 @@ function RootLayoutNav() {
         router.replace('/(tabs)');
       }
     }
-  }, [session, profile, loading, segments]);
+  }, [session, profile, loading, segments, pathname]);
 
   useEffect(() => {
     const openMachineLink = (url: string | null) => {
@@ -99,6 +110,11 @@ function RootLayoutNav() {
 
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  document.documentElement.style.backgroundColor = Colors.background;
+  document.body.style.backgroundColor = Colors.background;
+}
+
 export default function RootLayout() {
   if (!CLERK_PUBLISHABLE_KEY) {
     throw new Error('Falta EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY en las variables de entorno.');
@@ -110,11 +126,10 @@ export default function RootLayout() {
       // En el celular la sesión se guarda cifrada; en la web Clerk usa sus propias cookies.
       tokenCache={Platform.OS === 'web' ? undefined : tokenCache}
     >
-      <ClerkLoaded>
-        <AuthProvider>
-          <RootLayoutNav />
-        </AuthProvider>
-      </ClerkLoaded>
+      {/* Sin ClerkLoaded: la encuesta y el kiosko se pintan ya, sin esperar a Clerk. */}
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
     </ClerkProvider>
   );
 }
