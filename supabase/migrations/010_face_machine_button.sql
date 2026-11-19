@@ -34,6 +34,21 @@ create trigger on_face_request_updated
 
 alter table public.face_requests enable row level security;
 
+-- Las reglas anteriores usan auth.uid() y fallan con Clerk: el id "user_..."
+-- no es un uuid. Se borran todas y se crean de nuevo con current_profile_id().
+do $$
+declare
+  pol record;
+begin
+  for pol in
+    select policyname
+    from pg_policies
+    where schemaname = 'public' and tablename = 'face_requests'
+  loop
+    execute format('drop policy if exists %I on public.face_requests', pol.policyname);
+  end loop;
+end $$;
+
 drop policy if exists "Users can view own face requests" on public.face_requests;
 create policy "Users can view own face requests"
   on public.face_requests for select
@@ -61,6 +76,20 @@ create policy "Users can delete own pending face requests"
   using (user_id = public.current_profile_id() and status = 'pending');
 
 grant select, insert, delete on public.face_requests to authenticated;
+
+-- "Mi rostro" guarda bien, pero al leer los vectores sigue una regla vieja
+-- que llama auth.uid() y revienta con el id de Clerk.
+drop policy if exists "Users can view own face embeddings" on public.face_embeddings;
+create policy "Users can view own face embeddings"
+  on public.face_embeddings for select
+  to authenticated
+  using (user_id = public.current_profile_id());
+
+drop policy if exists "Users can delete own face embeddings" on public.face_embeddings;
+create policy "Users can delete own face embeddings"
+  on public.face_embeddings for delete
+  to authenticated
+  using (user_id = public.current_profile_id());
 
 do $$
 begin

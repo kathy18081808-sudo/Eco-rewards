@@ -94,8 +94,17 @@ def sesion_activa(machine_id: str):
         "machine_id": f"eq.{machine_id}",
         "status": "eq.armed",
         "expires_at": f"gt.{_ahora()}",
-        "select": "id,user_id,source,expires_at,items_processed",
+        "select": "id,user_id,source,status,expires_at,items_processed",
         "order": "armed_at.desc",
+        "limit": "1",
+    })
+    return filas[0] if filas else None
+
+
+def sesion_por_id(session_id: str):
+    filas = _get("recycling_sessions", {
+        "id": f"eq.{session_id}",
+        "select": "id,user_id,source,status,expires_at,items_processed",
         "limit": "1",
     })
     return filas[0] if filas else None
@@ -170,5 +179,16 @@ def cerrar_peticion(request_id: str, status: str, session_id: str | None = None,
         headers=_headers(),
         params={"id": f"eq.{request_id}"},
         json=cuerpo,
+        timeout=TIMEOUT,
+    ).raise_for_status()
+
+
+def soltar_peticion(request_id: str):
+    """Cierra la petición solo si sigue pendiente, para no volver a abrir la misma sesión."""
+    requests.patch(
+        _rest("face_requests"),
+        headers=_headers(),
+        params={"id": f"eq.{request_id}", "status": "eq.pending"},
+        json={"status": "expired", "error": "sesión cerrada"},
         timeout=TIMEOUT,
     ).raise_for_status()

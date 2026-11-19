@@ -47,6 +47,7 @@ if sys.platform.startswith("linux") and os.path.isdir(_CUDNN):
 
 import json
 import pickle
+import select
 import subprocess
 import threading
 import time
@@ -110,6 +111,7 @@ def abrir_camara():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     if not cap.isOpened():
         ayuda = "v4l2-ctl --list-devices" if sys.platform.startswith("linux") else "prueba con CAMARA=1"
         sys.exit(f"No pude abrir la cámara. Revisa con: {ayuda}")
@@ -285,6 +287,8 @@ class Sesion:
         self.info = None          # {"nombre", "puntos", "inicio", "items", "segundos"}
         self.mensaje = ""
         self.ultimo = {}          # profile_id -> momento en que terminó su sesión
+        self.pedido_id = None     # petición de la app que abrió la sesión actual
+        self.soltar = False       # la sesión ya se cerró: dejar de buscar ese rostro
         self._lock = threading.Lock()
         self._ocupado = False
         self.al_vincular = None   # se llama para guardar el JSON cuando se vincula una cuenta
@@ -316,9 +320,13 @@ class Sesion:
 
         def trabajo():
             try:
-                ecorewards.abrir_sesion(self.maquina["id"], pid)
-                self.mensaje = f"Sesión abierta para {persona['nombre']}"
-                print(self.mensaje)
+                creada = ecorewards.abrir_sesion(self.maquina["id"], pid)
+                if creada:
+                    self.mensaje = f"Sesión abierta para {persona['nombre']}"
+                    print(self.mensaje)
+                else:
+                    self.mensaje = "La máquina ya tiene una sesión abierta"
+                    print(self.mensaje)
             except Exception as e:
                 self.mensaje = f"Error al abrir sesión: {e}"
                 print(self.mensaje)
@@ -334,9 +342,18 @@ class Sesion:
     def _seguir(self):
         while True:
             try:
-                s = ecorewards.sesion_activa(self.maquina["id"])
+                if self.info:
+                    s = ecorewards.sesion_por_id(self.info["id"])
+                    sigue = (
+                        s
+                        and s["status"] == "armed"
+                        and datetime.fromisoformat(s["expires_at"].replace("Z", "+00:00")) > datetime.now(timezone.utc)
+                    )
+                else:
+                    s = ecorewards.sesion_activa(self.maquina["id"])
+                    sigue = s is not None
                 with self._lock:
-                    if s:
+                    if sigue:
                         perfil = ecorewards.perfil_por_id(s["user_id"])
                         fin = datetime.fromisoformat(s["expires_at"].replace("Z", "+00:00"))
                         inicio = self.info["inicio"] if self.info and self.info["id"] == s["id"] else perfil["points_balance"]
@@ -351,9 +368,24 @@ class Sesion:
                             "segundos": max(0, int((fin - datetime.now(timezone.utc)).total_seconds())),
                         }
                     elif self.info:
+                        nombre = self.info["nombre"]
+                        ganados = self.info["puntos"] - self.info["inicio"]
+                        estado = s["status"] if s else "expired"
                         self.ultimo[self.info["user_id"]] = time.time()
-                        print(f"Sesión terminada: {self.info['nombre']} ganó {self.info['puntos'] - self.info['inicio']} pts")
+                        if estado == "cancelled":
+                            aviso = f"Sesión cancelada: {nombre}. Sigo esperando el botón."
+                        else:
+                            aviso = f"Sesión terminada: {nombre} ganó {ganados} pts. Sigo esperando el botón."
+                        print(aviso)
+                        self.mensaje = aviso
                         self.info = None
+                        if self.pedido_id:
+                            try:
+                                ecorewards.soltar_peticion(self.pedido_id)
+                            except Exception as e:
+                                print(e)
+                            self.pedido_id = None
+                        self.soltar = True
             except Exception as e:
                 self.mensaje = f"Sin conexión: {e}"
             time.sleep(1.5)
@@ -369,9 +401,14 @@ class DescriptorApp:
                 "Faltan las librerías del vector de 'Mi rostro'. "
                 "En face_terminal ejecuta: npm install"
             )
+        self._script = script
+        self._n = 0
+        self._arrancar()
+
+    def _arrancar(self):
         self.listo = threading.Event()
         self.proc = subprocess.Popen(
-            ["node", str(script)],
+            ["node", str(self._script)],
             cwd=BASE,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -379,25 +416,40 @@ class DescriptorApp:
             text=True,
             bufsize=1,
         )
-        threading.Thread(target=self._leer_errores, daemon=True).start()
+        threading.Thread(target=self._leer_errores, args=(self.proc,), daemon=True).start()
         if not self.listo.wait(120):
             self.cerrar()
             sys.exit("El modelo de 'Mi rostro' no arrancó. Revisa: npm install")
 
-    def _leer_errores(self):
-        for linea in self.proc.stderr:
+    def _leer_errores(self, proc):
+        for linea in proc.stderr:
             texto = linea.rstrip()
-            if texto:
-                print(texto)
             if "listos" in texto:
                 self.listo.set()
+            elif texto and "Corrupt JPEG" not in texto and "TensorFlow.js in Node" not in texto:
+                print(texto)
 
     def vector(self, frame):
-        foto = BASE / ".frame.jpg"
-        cv2.imwrite(str(foto), frame)
-        self.proc.stdin.write(str(foto) + "\n")
-        self.proc.stdin.flush()
-        linea = self.proc.stdout.readline()
+        if self.proc.poll() is not None:
+            print("El reconocimiento se reinició.")
+            self._arrancar()
+        alto, ancho = frame.shape[:2]
+        if ancho > 480:
+            frame = cv2.resize(frame, (480, int(alto * 480 / ancho)))
+        self._n += 1
+        foto = BASE / f".frame-{self._n}.jpg"
+        cv2.imwrite(str(foto), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        try:
+            self.proc.stdin.write(str(foto) + "\n")
+            self.proc.stdin.flush()
+            if not select.select([self.proc.stdout], [], [], 8)[0]:
+                print("El reconocimiento tardó demasiado y se reinició.")
+                self.cerrar()
+                self._arrancar()
+                return None
+            linea = self.proc.stdout.readline()
+        finally:
+            foto.unlink(missing_ok=True)
         if not linea or linea.strip() == "null":
             return None
         return np.asarray(json.loads(linea), dtype=np.float32)
@@ -418,21 +470,136 @@ def reconocer_con_app():
     maquina = sesion.maquina
     print(f"Conectado a Eco-Rewards. Máquina: {maquina['name']} ({maquina['machine_code']})")
     print("Esperando 'Activar con mi rostro' en la app. ESPACIO identifica a cualquiera.")
+    print("Q o ESC cierra el programa. La sesión de la app no lo cierra.")
 
     descriptor = DescriptorApp()
     cap = abrir_camara()
+    estado = {
+        "frame": None,
+        "busqueda": None,
+        "rostros": {},
+        "etiqueta": None,
+        "listo": None,
+        "vencio": None,
+    }
+    candado = threading.Lock()
+    parar = threading.Event()
+
+    def reconocer_en_segundo_plano():
+        racha_id, racha = None, 0
+        while not parar.is_set():
+            with candado:
+                busqueda = estado["busqueda"]
+                frame = None if estado["frame"] is None else estado["frame"].copy()
+                rostros = estado["rostros"]
+            if busqueda is None or frame is None:
+                racha_id, racha = None, 0
+                time.sleep(0.05)
+                continue
+            if time.time() > busqueda["hasta"]:
+                with candado:
+                    if estado["busqueda"] is busqueda:
+                        estado["busqueda"] = None
+                        estado["etiqueta"] = None
+                        estado["vencio"] = busqueda
+                continue
+            try:
+                vector = descriptor.vector(frame)
+            except Exception as e:
+                print(f"Reconocimiento: {e}")
+                time.sleep(0.4)
+                continue
+            candidatos = (
+                {busqueda["user_id"]: rostros.get(busqueda["user_id"], [])}
+                if busqueda.get("user_id")
+                else rostros
+            )
+            mejor_id, mejor_d = None, UMBRAL
+            if vector is not None:
+                for user_id, muestras in candidatos.items():
+                    for muestra in muestras:
+                        d = distancia(vector, muestra)
+                        if d < mejor_d:
+                            mejor_id, mejor_d = user_id, d
+            if mejor_id and mejor_id == racha_id:
+                racha += 1
+            else:
+                racha_id, racha = mejor_id, (1 if mejor_id else 0)
+            if mejor_id:
+                etiqueta = f"coincide ({mejor_d:.2f})"
+            elif vector is not None:
+                etiqueta = "no coincide"
+            else:
+                etiqueta = "sin cara"
+            abrir = None
+            if mejor_id and racha >= CONFIRMAR and not sesion.info and not sesion._ocupado:
+                abrir = {"profile_id": mejor_id, "nombre": "Reciclador", "cuenta": mejor_id, "pedido": busqueda}
+                racha_id, racha = None, 0
+            with candado:
+                if estado["busqueda"] is busqueda:
+                    estado["etiqueta"] = etiqueta
+                    if abrir:
+                        estado["listo"] = abrir
+                        estado["busqueda"] = None
+
+    hilo = threading.Thread(target=reconocer_en_segundo_plano, daemon=True)
+    hilo.start()
     rostros = {}
     actualizado = 0.0
-    busqueda = None
-    racha_id, racha = None, 0
 
     try:
         while True:
+            for _ in range(2):
+                cap.grab()
             ok, frame = cap.read()
             if not ok:
                 continue
+            with candado:
+                estado["frame"] = frame
+                busqueda = estado["busqueda"]
+                etiqueta = estado["etiqueta"]
+                listo = estado.pop("listo", None)
+                vencio = estado.pop("vencio", None)
+
+            if vencio and vencio.get("request_id"):
+                try:
+                    ecorewards.cerrar_peticion(vencio["request_id"], "expired", error="tiempo agotado")
+                except Exception as e:
+                    print(e)
+                print("No se reconoció a tiempo. Sigo esperando el botón.")
+
+            if sesion.soltar:
+                sesion.soltar = False
+                with candado:
+                    estado["busqueda"] = None
+                    estado["etiqueta"] = None
+                busqueda = None
+
+            if listo:
+                persona = listo
+                try:
+                    persona["nombre"] = ecorewards.nombre(ecorewards.perfil_por_id(persona["profile_id"]))
+                except Exception:
+                    pass
+                pedido = persona.pop("pedido")
+                sesion.pedido_id = pedido.get("request_id")
+                sesion.abrir(persona)
+                if pedido.get("request_id"):
+                    def marcar(rid=pedido["request_id"], pid=persona["profile_id"]):
+                        try:
+                            for _ in range(20):
+                                time.sleep(0.4)
+                                activa = ecorewards.sesion_activa(maquina["id"])
+                                if activa and activa["user_id"] == pid:
+                                    ecorewards.cerrar_peticion(rid, "matched", session_id=activa["id"])
+                                    return
+                            ecorewards.cerrar_peticion(rid, "failed", error="no se pudo abrir la sesión")
+                        except Exception as e:
+                            print(e)
+                    threading.Thread(target=marcar, daemon=True).start()
+
             ahora = time.time()
-            if ahora - actualizado > 2:
+            if ahora - actualizado > 2 and busqueda is None and not sesion.info:
                 actualizado = ahora
                 try:
                     rostros = {}
@@ -443,76 +610,23 @@ def reconocer_con_app():
                                 float(x) for x in muestra.strip("{}").split(",") if x
                             ]
                         rostros.setdefault(fila["user_id"], []).append(muestra)
-                    if busqueda is None:
-                        pendientes = ecorewards.peticiones_pendientes(maquina["id"])
-                        if pendientes:
-                            pet = pendientes[0]
-                            busqueda = {
+                    with candado:
+                        estado["rostros"] = rostros
+                    pendientes = ecorewards.peticiones_pendientes(maquina["id"])
+                    if pendientes and estado["busqueda"] is None:
+                        pet = pendientes[0]
+                        with candado:
+                            estado["busqueda"] = {
                                 "user_id": pet["user_id"],
                                 "request_id": pet["id"],
                                 "hasta": datetime.fromisoformat(
                                     pet["expires_at"].replace("Z", "+00:00")
                                 ).timestamp(),
                             }
-                            racha_id, racha = None, 0
-                            print("La app pidió reconocer un rostro. Mira a la cámara.")
+                            estado["etiqueta"] = "Mira a la camara"
+                        print("La app pidió reconocer un rostro. Mira a la cámara.")
                 except Exception as e:
                     sesion.mensaje = f"Sin conexión: {e}"
-
-            etiqueta = None
-            if busqueda and ahora > busqueda["hasta"]:
-                if busqueda.get("request_id"):
-                    try:
-                        ecorewards.cerrar_peticion(busqueda["request_id"], "expired", error="tiempo agotado")
-                    except Exception as e:
-                        print(e)
-                print("No se reconoció a tiempo.")
-                busqueda = None
-                racha_id, racha = None, 0
-            elif busqueda:
-                vector = descriptor.vector(frame)
-                candidatos = (
-                    {busqueda["user_id"]: rostros.get(busqueda["user_id"], [])}
-                    if busqueda.get("user_id")
-                    else rostros
-                )
-                mejor_id, mejor_d = None, UMBRAL
-                if vector is not None:
-                    for user_id, muestras in candidatos.items():
-                        for muestra in muestras:
-                            d = distancia(vector, muestra)
-                            if d < mejor_d:
-                                mejor_id, mejor_d = user_id, d
-                if mejor_id and mejor_id == racha_id:
-                    racha += 1
-                else:
-                    racha_id, racha = mejor_id, (1 if mejor_id else 0)
-                if mejor_id:
-                    etiqueta = f"coincide ({mejor_d:.2f})"
-                elif vector is not None:
-                    etiqueta = "no coincide"
-                else:
-                    etiqueta = "sin cara"
-                if mejor_id and racha >= CONFIRMAR and not sesion.info and not sesion._ocupado:
-                    persona = {"profile_id": mejor_id, "nombre": "Reciclador", "cuenta": mejor_id}
-                    try:
-                        persona["nombre"] = ecorewards.nombre(ecorewards.perfil_por_id(mejor_id))
-                    except Exception:
-                        pass
-                    request_id = busqueda.get("request_id")
-                    sesion.abrir(persona)
-                    if request_id:
-                        def marcar(rid=request_id, pid=mejor_id):
-                            for _ in range(20):
-                                time.sleep(0.4)
-                                activa = ecorewards.sesion_activa(maquina["id"])
-                                if activa and activa["user_id"] == pid:
-                                    ecorewards.cerrar_peticion(rid, "matched", session_id=activa["id"])
-                                    return
-                            ecorewards.cerrar_peticion(rid, "failed", error="no se pudo abrir la sesión")
-                        threading.Thread(target=marcar, daemon=True).start()
-                    busqueda = None
-                    racha_id, racha = None, 0
 
             if sesion.info:
                 info = sesion.info
@@ -538,17 +652,22 @@ def reconocer_con_app():
                     frame, texto, (20, frame.shape[0] - alto + 35 + 32 * i),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
                 )
-            cv2.imshow("Reconocer - Eco-Rewards", frame)
+            try:
+                cv2.imshow("Reconocer - Eco-Rewards", frame)
+            except cv2.error:
+                continue
             k = cv2.waitKey(1) & 0xFF
             if k in (ord("q"), 27):
                 break
             if k == ord("t"):
                 sesion.terminar()
             if k == 32 and busqueda is None and not sesion.info:
-                busqueda = {"user_id": None, "request_id": None, "hasta": time.time() + 25}
-                racha_id, racha = None, 0
+                with candado:
+                    estado["busqueda"] = {"user_id": None, "request_id": None, "hasta": time.time() + 25}
+                    estado["etiqueta"] = "Mira a la camara"
                 print("Botón de la máquina: identificando a cualquiera durante 25 s.")
     finally:
+        parar.set()
         cap.release()
         cv2.destroyAllWindows()
         descriptor.cerrar()
