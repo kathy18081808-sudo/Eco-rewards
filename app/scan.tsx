@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { armMachineSession, parseMachineCode } from '../lib/machineSessions';
+import { armMachineSession, MACHINE_OCCUPIED_ERROR, parseMachineCode } from '../lib/machineSessions';
 import { BorderRadius, Colors, FontSize, Spacing } from '../constants/theme';
 
 export default function ScanMachineScreen() {
@@ -42,7 +42,12 @@ export default function ScanMachineScreen() {
       } catch (error: any) {
         armingRef.current = false;
         setLockedCode(null);
-        Alert.alert('Could not arm machine', error.message || 'Please try scanning again.');
+        const message = error?.message || 'Please try scanning again.';
+        if (message === MACHINE_OCCUPIED_ERROR) {
+          Alert.alert(MACHINE_OCCUPIED_ERROR);
+        } else {
+          Alert.alert('Could not arm machine', message);
+        }
       } finally {
         setArming(false);
       }

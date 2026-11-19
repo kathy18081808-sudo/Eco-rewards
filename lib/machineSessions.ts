@@ -10,6 +10,8 @@ export interface ArmedSessionResponse {
   display_name: string;
 }
 
+export const MACHINE_OCCUPIED_ERROR = 'La máquina está siendo ocupada';
+
 export function machineQrPayload(machineCode: string) {
   return `ecorewards://machine/${machineCode}`;
 }

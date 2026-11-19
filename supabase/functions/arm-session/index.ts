@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SESSION_TTL_MS = 60_000;
+const MACHINE_OCCUPIED_ERROR = 'La máquina está siendo ocupada';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -90,30 +91,49 @@ Deno.serve(async (req: Request) => {
     }
 
     const now = new Date().toISOString();
-    const { data: existingSession, error: existingSessionError } = await serviceClient
+    const { error: expireError } = await serviceClient
       .from('recycling_sessions')
-      .select('id, expires_at')
+      .update({ status: 'expired' })
+      .eq('status', 'armed')
+      .lte('expires_at', now)
+      .or(`machine_id.eq.${machine.id},user_id.eq.${user.id}`);
+
+    if (expireError) {
+      return jsonResponse({ error: 'Could not expire stale machine sessions' }, 500);
+    }
+
+    const { data: activeSession, error: activeSessionError } = await serviceClient
+      .from('recycling_sessions')
+      .select('id, user_id, expires_at')
       .eq('machine_id', machine.id)
-      .eq('user_id', user.id)
       .eq('status', 'armed')
       .gt('expires_at', now)
       .order('armed_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (existingSessionError) {
+    if (activeSessionError) {
       return jsonResponse({ error: 'Could not load existing machine session' }, 500);
     }
 
-    if (existingSession) {
-      return armedSessionResponse({ session: existingSession, machine, profile });
+    if (activeSession?.user_id === user.id) {
+      return armedSessionResponse({ session: activeSession, machine, profile });
     }
 
-    await serviceClient
+    if (activeSession) {
+      return jsonResponse({ error: MACHINE_OCCUPIED_ERROR }, 409);
+    }
+
+    const { error: cancelOwnError } = await serviceClient
       .from('recycling_sessions')
       .update({ status: 'cancelled' })
       .eq('status', 'armed')
-      .or(`user_id.eq.${user.id},machine_id.eq.${machine.id}`);
+      .eq('user_id', user.id)
+      .neq('machine_id', machine.id);
+
+    if (cancelOwnError) {
+      return jsonResponse({ error: 'Could not arm machine session' }, 500);
+    }
 
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
     const { data: session, error: sessionError } = await serviceClient
@@ -131,17 +151,20 @@ Deno.serve(async (req: Request) => {
     if (sessionError || !session) {
       const { data: racedSession } = await serviceClient
         .from('recycling_sessions')
-        .select('id, expires_at')
+        .select('id, user_id, expires_at')
         .eq('machine_id', machine.id)
-        .eq('user_id', user.id)
         .eq('status', 'armed')
         .gt('expires_at', new Date().toISOString())
         .order('armed_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (racedSession) {
+      if (racedSession?.user_id === user.id) {
         return armedSessionResponse({ session: racedSession, machine, profile });
+      }
+
+      if (racedSession) {
+        return jsonResponse({ error: MACHINE_OCCUPIED_ERROR }, 409);
       }
 
       return jsonResponse({ error: 'Could not arm machine session' }, 500);
