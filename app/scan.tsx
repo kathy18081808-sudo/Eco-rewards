@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -11,7 +12,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { armMachineSession, MACHINE_OCCUPIED_ERROR, parseMachineCode } from '../lib/machineSessions';
+import {
+  armMachineSession,
+  MACHINE_OCCUPIED_ERROR,
+  occupiedScanIsRemembered,
+  parseMachineCode,
+  rememberOccupiedScan,
+} from '../lib/machineSessions';
 import { BorderRadius, Colors, FontSize, Spacing } from '../constants/theme';
 
 export default function ScanMachineScreen() {
@@ -20,11 +27,21 @@ export default function ScanMachineScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [arming, setArming] = useState(false);
   const [lockedCode, setLockedCode] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState(false);
   const armingRef = useRef(false);
+  const blockedRef = useRef(false);
+
+  const leaveToDashboard = useCallback(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.replace('/');
+      return;
+    }
+    router.replace('/(tabs)');
+  }, [router]);
 
   const armMachine = useCallback(
     async (machineCode: string) => {
-      if (armingRef.current) return;
+      if (blockedRef.current || armingRef.current) return;
       armingRef.current = true;
       setArming(true);
       setLockedCode(machineCode);
@@ -41,9 +58,17 @@ export default function ScanMachineScreen() {
         });
       } catch (error: any) {
         const message = error?.message || 'Please try scanning again.';
-        if (message === MACHINE_OCCUPIED_ERROR) {
+        if (message === MACHINE_OCCUPIED_ERROR || message.includes('ocupada')) {
+          blockedRef.current = true;
+          setBlocked(true);
+          rememberOccupiedScan();
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.alert(MACHINE_OCCUPIED_ERROR);
+            leaveToDashboard();
+            return;
+          }
           Alert.alert(MACHINE_OCCUPIED_ERROR, undefined, [
-            { text: 'Cerrar', onPress: () => router.replace('/(tabs)') },
+            { text: 'Cerrar', onPress: leaveToDashboard },
           ]);
           return;
         }
@@ -54,10 +79,17 @@ export default function ScanMachineScreen() {
         setArming(false);
       }
     },
-    [router]
+    [leaveToDashboard, router]
   );
 
   useEffect(() => {
+    if (occupiedScanIsRemembered()) {
+      leaveToDashboard();
+    }
+  }, [leaveToDashboard]);
+
+  useEffect(() => {
+    if (blockedRef.current || occupiedScanIsRemembered()) return;
     const code = typeof machine_code === 'string' ? parseMachineCode(machine_code) : null;
     if (code && code !== lockedCode) {
       armMachine(code);
@@ -65,6 +97,7 @@ export default function ScanMachineScreen() {
   }, [armMachine, lockedCode, machine_code]);
 
   const handleBarcodeScanned = ({ data }: BarcodeScanningResult) => {
+    if (blockedRef.current || armingRef.current) return;
     const machineCode = parseMachineCode(data);
     if (!machineCode || lockedCode) return;
     armMachine(machineCode);
@@ -111,12 +144,14 @@ export default function ScanMachineScreen() {
       </View>
 
       <View style={styles.cameraWrap}>
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          onBarcodeScanned={lockedCode ? undefined : handleBarcodeScanned}
-          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-        />
+        {blocked ? null : (
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            onBarcodeScanned={lockedCode ? undefined : handleBarcodeScanned}
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          />
+        )}
         <View pointerEvents="none" style={styles.scanFrame} />
       </View>
 

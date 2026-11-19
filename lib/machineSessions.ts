@@ -11,6 +11,22 @@ export interface ArmedSessionResponse {
 }
 
 export const MACHINE_OCCUPIED_ERROR = 'La máquina está siendo ocupada';
+const OCCUPIED_SCAN_KEY = 'eco-machine-occupied';
+
+export function rememberOccupiedScan() {
+  if (typeof sessionStorage === 'undefined') return;
+  sessionStorage.setItem(OCCUPIED_SCAN_KEY, '1');
+}
+
+export function clearOccupiedScan() {
+  if (typeof sessionStorage === 'undefined') return;
+  sessionStorage.removeItem(OCCUPIED_SCAN_KEY);
+}
+
+export function occupiedScanIsRemembered() {
+  if (typeof sessionStorage === 'undefined') return false;
+  return sessionStorage.getItem(OCCUPIED_SCAN_KEY) === '1';
+}
 
 export function machineQrPayload(machineCode: string) {
   return `ecorewards://machine/${machineCode}`;

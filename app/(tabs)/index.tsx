@@ -20,6 +20,7 @@ import PointsCard from '../../components/PointsCard';
 import TransactionItem from '../../components/TransactionItem';
 import AccountNumberModal from '../../components/AccountNumberModal';
 import { countFaceSamples, createFaceRequest, FACE_MACHINE_CODE } from '../../lib/machineFace';
+import { clearOccupiedScan } from '../../lib/machineSessions';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
 
 export default function HomeScreen() {
@@ -247,7 +248,10 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.recycleButton}
-          onPress={() => router.push('/scan')}
+          onPress={() => {
+            clearOccupiedScan();
+            router.push('/scan');
+          }}
           activeOpacity={0.8}
         >
           <View style={styles.recycleButtonInner}>
