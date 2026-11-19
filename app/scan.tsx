@@ -40,14 +40,16 @@ export default function ScanMachineScreen() {
           },
         });
       } catch (error: any) {
-        armingRef.current = false;
-        setLockedCode(null);
         const message = error?.message || 'Please try scanning again.';
         if (message === MACHINE_OCCUPIED_ERROR) {
-          Alert.alert(MACHINE_OCCUPIED_ERROR);
-        } else {
-          Alert.alert('Could not arm machine', message);
+          Alert.alert(MACHINE_OCCUPIED_ERROR, undefined, [
+            { text: 'Cerrar', onPress: () => router.replace('/(tabs)') },
+          ]);
+          return;
         }
+        armingRef.current = false;
+        setLockedCode(null);
+        Alert.alert('Could not arm machine', message);
       } finally {
         setArming(false);
       }
