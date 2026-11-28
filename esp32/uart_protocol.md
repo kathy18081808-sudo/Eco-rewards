@@ -1,9 +1,44 @@
-## ESP32-CAM To Controller UART Protocol
+## Vision To Controller Protocol
 
-This protocol connects `ArtificialVision/ArtificialVision.ino` on the `ESP32-CAM AI Thinker`
-to `esp32/vision_controller/vision_controller.ino` on the controller `ESP32`.
+The controller in `esp32/vision_controller/vision_controller.ino` accepts the same
+detection line from two places:
 
-### Wiring
+- WiFi TCP port `8090` (the computer vision script in `vision/clasificar.py`).
+- UART from a legacy ESP32-CAM (`ArtificialVision/ArtificialVision.ino`).
+
+### WiFi
+
+The controller joins the same LAN it already uses for Supabase and listens on
+port `8090`. The computer sends one line and reads one reply:
+
+```text
+DETECT:bottle
+```
+
+Reply:
+
+```text
+OK
+```
+
+or
+
+```text
+IGNORADO
+```
+
+`OK` means the line was accepted and the servo cycle will run. `IGNORADO` means
+the line was not a supported detection, no account is active, or another item
+is still being processed. The controller closes the connection before the servo
+moves, so the computer does not wait for the sort.
+
+The serial monitor and the LCD show the controller IP at boot, for example
+`192.168.1.42`. Put that address in `vision/.env` as `ESP32_HOST`.
+
+### UART wiring
+
+This path connects `ArtificialVision/ArtificialVision.ino` on the `ESP32-CAM AI Thinker`
+to the controller `ESP32`. The WiFi listener does not replace it.
 
 - Connect `GND` on both boards.
 - Connect `ESP32-CAM TX` to the controller `ESP32 RX`.
@@ -18,7 +53,7 @@ If those pins conflict with your board layout, change the constants in both sket
 
 ### Message Format
 
-The camera sends one newline-terminated ASCII message per accepted detection:
+The computer (or the legacy camera) sends one newline-terminated ASCII message per accepted detection:
 
 ```text
 DETECT:bottle

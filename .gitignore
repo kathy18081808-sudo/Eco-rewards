@@ -46,3 +46,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Fotos y pesos de la clasificacion local
+vision/dataset/
+vision/models/*.onnx
+vision/venv/
+vision/__pycache__/
+.venv-entrenar/
+runs/
+__pycache__/

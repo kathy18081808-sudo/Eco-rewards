@@ -1,0 +1,6 @@
+# Solo lo que corre en vivo, al lado del reconocimiento facial.
+# El entrenamiento (ultralytics / PyTorch) va en otro entorno: ver README.md.
+opencv-python
+numpy
+onnxruntime
+python-dotenv

@@ -9,7 +9,9 @@
  *    number on the keypad as a fallback.
  * 2. The controller polls Supabase for a QR-armed session or validates the
  *    keypad account.
- * 3. The ESP32-CAM sends `DETECT:bottle` or `DETECT:can` over UART.
+ * 3. The computer vision script (or a legacy ESP32-CAM) sends `DETECT:bottle`
+ *    or `DETECT:can`. The script uses WiFi TCP port 8090. UART on GPIO32
+ *    still accepts the same line.
  * 4. The controller runs the servo cycle once per accepted item.
  * 5. The controller credits reward points through the existing add-points function.
  *
@@ -56,6 +58,8 @@ const unsigned long SESSION_POLL_INTERVAL_MS = 2000;
 
 const int VISION_UART_BAUD_RATE = 115200;
 const int VISION_RX_PIN = 32;
+const int VISION_TCP_PORT = 8090;
+const unsigned long VISION_TCP_READ_TIMEOUT_MS = 200;
 
 const int SERVO_PIN = 13;
 const int POS_ORIGEN = 84;
@@ -85,6 +89,8 @@ const unsigned long STATUS_MESSAGE_DELAY_MS = 1200;
 
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 HardwareSerial visionSerial(2);
+WiFiServer visionServer(VISION_TCP_PORT);
+bool visionServerStarted = false;
 Servo sortingServo;
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
 
@@ -110,7 +116,9 @@ void turnOffRelayIndicator();
 void handleKeypadInput();
 void handleActiveAccountTimeout();
 void handleVisionMessages();
-void handleVisionLine(const String& line);
+void handleVisionTcp();
+void handleVisionLine(const String& line, const String& source);
+bool visionCommandAccepted(const String& line);
 bool processDetectedItem(const String& itemType);
 void runServoCycle(const String& itemType);
 void moveServoSlowly(int targetPosition);
@@ -131,6 +139,10 @@ void setup() {
   pinMode(VISION_RX_PIN, INPUT_PULLUP);
   visionSerial.begin(VISION_UART_BAUD_RATE, SERIAL_8N1, VISION_RX_PIN, -1);
 
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
   sortingServo.setPeriodHertz(50);
   sortingServo.attach(SERVO_PIN, SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US);
   sortingServo.write(POS_CENTRO);
@@ -160,26 +172,31 @@ void loop() {
   handleQrSessionPolling();
   handleActiveAccountTimeout();
   handleVisionMessages();
+  handleVisionTcp();
   delay(20);
 }
 
 void connectToWiFi() {
-  if (WiFi.status() == WL_CONNECTED) {
-    return;
+  if (WiFi.status() != WL_CONNECTED) {
+    showStatus("Connecting WiFi", "Please wait");
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to WiFi");
+
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+
+    Serial.println("\nConnected to WiFi.");
   }
 
-  showStatus("Connecting WiFi", "Please wait");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  if (!visionServerStarted) {
+    visionServer.begin();
+    visionServerStarted = true;
+    Serial.println("Vision TCP listening on " + WiFi.localIP().toString() + ":" + String(VISION_TCP_PORT));
+    showStatus("TCP " + String(VISION_TCP_PORT), WiFi.localIP().toString());
+    delay(STATUS_MESSAGE_DELAY_MS);
   }
-
-  Serial.println("\nConnected to WiFi.");
-  showStatus("WiFi connected", "Ready");
-  delay(STATUS_MESSAGE_DELAY_MS);
 }
 
 void setRelayIndicator(bool on) {
@@ -502,7 +519,7 @@ void handleVisionMessages() {
 
     if (incoming == '\n') {
       if (uartBuffer.length() > 0) {
-        handleVisionLine(uartBuffer);
+        handleVisionLine(uartBuffer, "UART");
         uartBuffer = "";
       }
       continue;
@@ -517,12 +534,38 @@ void handleVisionMessages() {
   }
 }
 
-void handleVisionLine(const String& line) {
-  Serial.println("UART received: " + line);
+void handleVisionTcp() {
+  if (!visionServerStarted) {
+    return;
+  }
+
+  WiFiClient client = visionServer.available();
+  if (!client) {
+    return;
+  }
+
+  client.setTimeout(VISION_TCP_READ_TIMEOUT_MS);
+  String line = client.readStringUntil('\n');
+  line.trim();
+
+  client.println(visionCommandAccepted(line) ? "OK" : "IGNORADO");
+  client.flush();
+  delay(20);
+  client.stop();
+
+  if (line.length() == 0) {
+    return;
+  }
+
+  handleVisionLine(line, "TCP");
+}
+
+void handleVisionLine(const String& line, const String& source) {
+  Serial.println(source + " received: " + line);
 
   if (!line.startsWith("DETECT:")) {
-    Serial.println("Ignoring unknown UART message.");
-    showStatus("UART ignored", "Unknown msg");
+    Serial.println("Ignoring unknown vision message.");
+    showStatus("Msg ignored", "Unknown msg");
     delay(STATUS_MESSAGE_DELAY_MS);
     if (activeAccountNumber.length() > 0) {
       showWaitingForItem();
@@ -629,6 +672,16 @@ int getServoTargetPosition(const String& itemType) {
 
 bool isSupportedItemType(const String& itemType) {
   return itemType == "bottle" || itemType == "can";
+}
+
+bool visionCommandAccepted(const String& line) {
+  if (!line.startsWith("DETECT:")) {
+    return false;
+  }
+
+  String itemType = line.substring(7);
+  itemType.trim();
+  return isSupportedItemType(itemType) && activeAccountNumber.length() > 0 && !isProcessingItem;
 }
 
 String formatLine(const String& text) {
